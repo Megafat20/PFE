@@ -1,0 +1,56 @@
+1. SLAS Technol. 2025 Apr 17:100295. doi: 10.1016/j.slast.2025.100295. Online
+ahead  of print.
+
+NLP for Computational Insights into Nutritional Impacts on Colorectal Cancer 
+Care.
+
+Gong S(1), Jin X(2), Guo Y(3), Yu J(4).
+
+Author information:
+(1)The Affiliated Hospital of Nantong University, Nantong University, Nantong, 
+Jiangsu, 226001, China. Electronic address: gsn6574172@163.com.
+(2)The Affiliated Hospital of Nantong University, Nantong, Jiangsu, 226001, 
+China. Electronic address: 1554319715@qq.com.
+(3)Nantong University, Nantong, Jiangsu, 226001, China. Electronic address: 
+jyg@ntu.edu.cn.
+(4)Nantong University, Nantong, Jiangsu, 226001, China. Electronic address: 
+1014147829@qq.com.
+
+Colorectal cancer (CRC) is one of the most prominent cancers globally, with its 
+incidence rising among younger adults due to improved screening practices. 
+However, existing algorithms for CRC prediction are frequently trained on 
+datasets that primarily reflect older persons, thus limiting their usefulness in 
+more diverse populations. Additionally, the part of nutrition in CRC deterrence 
+and management is gaining significant attention, although computational 
+approaches to analyzing the impact of diet on CRC remain underdeveloped. This 
+research introduces the Nutritional Impact on CRC Prediction Framework 
+(NICRP-Framework), which combines Natural Language Processing (NLP) techniques 
+with Adaptive Tunicate Swarm Optimized Large Language Models (ATSO-LLMs) to 
+present important insights into the part of the diet in CRC care across diverse 
+populations. The colorectal cancer dietary and lifestyle dataset, encompassing 
+more than 1000 participants, is collected from multiple regions and sources. The 
+dataset includes structured and unstructured data, including textual 
+descriptions of food ingredients. These descriptions are processed using 
+standardization techniques, such as stop word removal, lowercasing, and 
+punctuation elimination. Relevant terms are then extracted and visualized in a 
+word cloud. The dataset also contained an imbalanced binary CRC outcome, which 
+is rebalanced utilizing the random oversampling. ATSO-LLMs are employed to 
+analyze the processed dietary data, identifying key nutritional factors and 
+forecasting CRC and non-CRC phenotypes based on dietary patterns. The results 
+show that combining NLP-derived features with ATSO-LLMs significantly enhances 
+prediction accuracy (98.4%), sensitivity (97.6%) specificity (96.9%) and 
+F1-Score (96.2%), with minimal misclassification rates. This framework 
+represents a transformative advancement in life science by offering a new, 
+data-driven approach to understanding the nutritional determinants of CRC, 
+empowering healthcare professionals to make more precise predictions and adapted 
+dietary interventions for diverse populations.
+
+Copyright © 2025. Published by Elsevier Inc.
+
+DOI: 10.1016/j.slast.2025.100295
+PMID: 40252975
+
+Conflict of interest statement: Declaration of competing interest The authors 
+declare that they have no known competing financial interests or personal 
+relationships that could have appeared to influence the work reported in this 
+paper.

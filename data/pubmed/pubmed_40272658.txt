@@ -1,0 +1,65 @@
+1. Int J Comput Assist Radiol Surg. 2025 Apr 24. doi: 10.1007/s11548-025-03359-4.
+ Online ahead of print.
+
+perfDSA: Automatic Perfusion Imaging in Cerebral Digital Subtraction 
+Angiography.
+
+Su R(1)(2), van der Sluijs PM(3), Marc FG(4), Te Nijenhuis F(3), Cornelissen 
+SAP(3), Roozenbeek B(3), van Zwam WH(5), van der Lugt A(3), Ruijters D(6), Pluim 
+J(4), van Walsum T(3).
+
+Author information:
+(1)Department of Biomedical Engineering, Eindhoven University of Technology, 
+Eindhoven, The Netherlands. r.su@tue.nl.
+(2)Department of Radiology & Nuclear Medicine, Erasmus MC, University Medical 
+Center Rotterdam, Rotterdam, The Netherlands. r.su@tue.nl.
+(3)Department of Radiology & Nuclear Medicine, Erasmus MC, University Medical 
+Center Rotterdam, Rotterdam, The Netherlands.
+(4)Department of Biomedical Engineering, Eindhoven University of Technology, 
+Eindhoven, The Netherlands.
+(5)Department of Radiology & Nuclear Medicine, Maastricht University Medical 
+Center, Maastricht, The Netherlands.
+(6)Interventional X-Ray (iXR), Philips Healthcare, Best, The Netherlands.
+
+PURPOSE: Cerebral digital subtraction angiography (DSA) is a standard imaging 
+technique in image-guided interventions for visualizing cerebral blood flow and 
+therapeutic guidance thanks to its high spatio-temporal resolution. To date, 
+cerebral perfusion characteristics in DSA are primarily assessed visually by 
+interventionists, which is time-consuming, error-prone, and subjective. To 
+facilitate fast and reproducible assessment of cerebral perfusion, this work 
+aims to develop and validate a fully automatic and quantitative framework for 
+perfusion DSA.
+METHODS: We put forward a framework, perfDSA, that automatically generates 
+deconvolution-based perfusion parametric images from cerebral DSA. It 
+automatically extracts the arterial input function from the supraclinoid 
+internal carotid artery (ICA) and computes deconvolution-based perfusion 
+parametric images including cerebral blood volume (CBV), cerebral blood flow 
+(CBF), mean transit time (MTT), and Tmax.
+RESULTS: On a DSA dataset with 1006 patients from the multicenter MR CLEAN 
+registry, the proposed perfDSA achieves a Dice of 0.73(±0.21) in segmenting the 
+supraclinoid ICA, resulting in high accuracy of arterial input function (AIF) 
+curves similar to manual extraction. Moreover, some extracted perfusion images 
+show statistically significant associations (P=2.62e -  5) with favorable 
+functional outcomes in stroke patients.
+CONCLUSION: The proposed perfDSA framework promises to aid therapeutic 
+decision-making in cerebrovascular interventions and facilitate discoveries of 
+novel quantitative biomarkers in clinical practice. The code is available at 
+https://github.com/RuishengSu/perfDSA .
+
+© 2025. The Author(s).
+
+DOI: 10.1007/s11548-025-03359-4
+PMID: 40272658
+
+Conflict of interest statement: Declarations. Conflict of interest: Wim H. van 
+Zwam received speaker fees from Philips, Nicolab, Stryker, Penumbra, Medtronic, 
+Microvention DSMB for WeTrust (Philips) and ATHENA (Anaconda), all paid to the 
+institution. Aad van der Lugt received research grants from Siemens 
+Healthineers, GE Healthcare, and Philips Healthcare, all paid to the 
+institution. Danny Ruijters is an employee of Philips. Theo van Walsum received 
+research grants from Philips Healthcare, paid to the institution. The rest of 
+the authors have no competing financial or nonfinancial interests to disclose 
+beyond the funding sources listed above. Ethics approval: The MR CLEAN Registry 
+was approved by the ethics committee of the Erasmus University MC, Rotterdam, 
+The Netherlands (MEC-2014-235). The need for individual patient consent has been 
+waived. Patient consent for publication: Not applicable.

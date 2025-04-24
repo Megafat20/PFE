@@ -1,0 +1,47 @@
+1. J Biomed Inform. 2025 Apr 16:104819. doi: 10.1016/j.jbi.2025.104819. Online 
+ahead of print.
+
+RoBIn: A Transformer-based model for risk of bias inference with machine reading 
+comprehension.
+
+Dias AC(1), Moreira VP(1), Comba JLD(2).
+
+Author information:
+(1)Instituto de Informatica, Av. Bento Goncalves 9500 - Caixa Postal 15064, 
+Porto Alegre, 91501-970, Rio Grande do Sul, Brazil.
+(2)Instituto de Informatica, Av. Bento Goncalves 9500 - Caixa Postal 15064, 
+Porto Alegre, 91501-970, Rio Grande do Sul, Brazil. Electronic address: 
+joao.comba@gmail.com.
+
+OBJECTIVE: Scientific publications are essential for uncovering insights, 
+testing new drugs, and informing healthcare policies. Evaluating the quality of 
+these publications often involves assessing their Risk of Bias (RoB), a task 
+traditionally performed by human reviewers. The goal of this work is to create a 
+dataset and develop models that allow automated RoB assessment in clinical 
+trials.
+METHODS: We use data from the Cochrane Database of Systematic Reviews (CDSR) as 
+ground truth to label open-access clinical trial publications from PubMed. This 
+process enabled us to develop training and test datasets specifically for 
+machine reading comprehension and RoB inference. Additionally, we created 
+extractive (RoBInExt) and generative (RoBInGen) Transformer-based approaches to 
+extract relevant evidence and classify the RoB effectively.
+RESULTS: RoBIn was evaluated across various settings and benchmarked against 
+state-of-the-art methods, including large language models (LLMs). In most cases, 
+the best-performing RoBIn variant surpasses traditional machine learning and 
+LLM-based approaches, achieving a AUROC of 0.83.
+CONCLUSION: This work addresses RoB assessment in clinical trials by introducing 
+RoBIn, two Transformer-based models for RoB inference and evidence retrieval, 
+which outperform traditional models and LLMs, demonstrating its potential to 
+improve efficiency and scalability in clinical research evaluation. We also 
+introduce a public dataset that is automatically annotated and can be used to 
+enable future research to enhance automated RoB assessment.
+
+Copyright © 2025. Published by Elsevier Inc.
+
+DOI: 10.1016/j.jbi.2025.104819
+PMID: 40250743
+
+Conflict of interest statement: Declaration of competing interest The authors 
+declare that they have no known competing financial interests or personal 
+relationships that could have appeared to influence the work reported in this 
+paper.
