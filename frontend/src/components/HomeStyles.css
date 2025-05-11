@@ -1,0 +1,95 @@
+/* Global styles */
+body {
+    font-family: 'Arial', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f9f9f9;
+  }
+  
+  .home-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  
+  .home-header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  
+  .home-header h1 {
+    font-size: 36px;
+    color: #333;
+  }
+  
+  .home-subheading {
+    font-size: 18px;
+    color: #666;
+    margin-top: 10px;
+  }
+  
+  .home-content {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 40px;
+  }
+  
+  .home-card {
+    background-color: #ffffff;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    width: 45%;
+    text-align: center;
+    transition: transform 0.3s ease-in-out;
+  }
+  
+  .home-card:hover {
+    transform: scale(1.05);
+  }
+  
+  .home-card h3 {
+    font-size: 24px;
+    color: #333;
+  }
+  
+  .home-card p {
+    font-size: 16px;
+    color: #555;
+  }
+  
+  .home-button {
+    display: inline-block;
+    padding: 12px 30px;
+    background-color: #4a90e2;
+    color: white;
+    border-radius: 5px;
+    text-decoration: none;
+    font-size: 16px;
+    margin-top: 20px;
+    transition: background-color 0.3s ease;
+  }
+  
+  .home-button:hover {
+    background-color: #357ab7;
+  }
+  
+  .home-footer {
+    text-align: center;
+    margin-top: 60px;
+    color: #777;
+    font-size: 14px;
+  }
+  
+  @media (max-width: 768px) {
+    .home-content {
+      flex-direction: column;
+      align-items: center;
+    }
+  
+    .home-card {
+      width: 80%;
+      margin-bottom: 20px;
+    }
+  }
+  

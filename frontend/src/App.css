@@ -1,0 +1,334 @@
+/* App.css */
+
+/* Style global */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+/* Layout de l'application */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  background-color: #f4f7fc;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 300px;
+  padding: 20px;
+  background-color: #2d2d2d;
+  color: white;
+}
+
+.sidebar h3 {
+  font-size: 24px;
+  margin-bottom: 20px;
+}
+
+.search-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-input {
+  padding: 10px;
+  font-size: 16px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.search-btn {
+  padding: 10px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.toggle-bubble-btn {
+  padding: 10px;
+  background-color: #5528a7;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-top: 10px;  /* Espacement entre le bouton rechercher et le bouton pour la bulle */
+}
+
+.search-btn:hover {
+  background-color: #45a049;
+}
+
+/* Chat Container */
+.chat-container {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: white;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.chat-header {
+  font-size: 30px;
+  margin-bottom: 20px;
+  color: #333;
+}
+
+/* Chat Box */
+.chat-box {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+}
+
+.message {
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  max-width: 70%;
+}
+
+.user {
+  background-color: #e3f2fd;
+  align-self: flex-end;
+}
+
+.bot {
+  background-color: #f1f1f1;
+  align-self: flex-start;
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  color: #888;
+}
+
+.typing-indicator .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #888;
+  margin-right: 5px;
+  animation: typing 1.5s infinite;
+}
+
+.typing-indicator .dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.typing-indicator .dot:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.typing-indicator .dot:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+@keyframes typing {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Input form */
+.input-form {
+  display: flex;
+  margin-top: 10px;
+}
+
+.user-input {
+  flex-grow: 1;
+  padding: 10px;
+  font-size: 16px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.submit-btn {
+  padding: 10px 20px;
+  margin-left: 10px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.submit-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.clear-btn {
+  padding: 10px 20px;
+  margin-left: 10px;
+  background-color: #f44336;
+  color: white;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.clear-btn:hover {
+  background-color: #e53935;
+}
+
+/* File upload */
+.file-preview {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.file-thumbnail {
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.file-upload-form {
+  display: flex;
+  margin-top: 20px;
+}
+
+.file-input {
+  padding: 10px;
+  font-size: 16px;
+  margin-right: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.upload-btn {
+  padding: 10px 20px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.upload-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.spinner {
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #3498db;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.floating-results {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  width: 320px;
+  background: white;
+  border: 1px solid #ccc;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  padding: 16px;
+  z-index: 999;
+  border-radius: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.floating-results h4 {
+  margin-top: 0;
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+
+.floating-results .close-btn {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: none;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #555;
+}
+
+.results-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.results-list li {
+  margin-bottom: 16px;
+}
+
+.results-list a {
+  color: #007bff;
+  text-decoration: none;
+}
+
+.summary {
+  font-size: 12px;
+  color: #444;
+}
+
+/* Style pour la bulle de bienvenue */
+.welcome-bubble {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: #f0f8ff;
+  border: 1px solid #007bff;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  font-size: 18px;
+  font-weight: bold;
+  z-index: 9999;
+}
+
+
+/* Animation pour faire apparaître la bulle */
+@keyframes showBubbles {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.8);  /* Petit effet de zoom */
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);  /* Retour à taille normale */
+  }
+}
+
+/* Optionnel : ajouter une petite flèche sous la bulle */
+.welcome-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 10px;
+  border-style: solid;
+  border-color: #4CAF50 transparent transparent transparent; /* Flèche verte */
+}

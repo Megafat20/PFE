@@ -1,0 +1,78 @@
+/* Style général de la barre de navigation */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #7f8d9c;
+  padding: 10px 20px;
+  color: white;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Logo de la barre de navigation */
+.navbar-logo {
+  font-size: 24px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.navbar-logo span {
+  font-size: 32px; /* Taille du logo */
+}
+
+/* Liens de navigation */
+.navbar-links {
+  list-style: none;
+  display: flex;
+  gap: 20px;
+}
+
+.navbar-links a {
+  color: white;
+  text-decoration: none;
+  font-size: 16px;
+  transition: color 0.3s;
+}
+
+.navbar-links a:hover {
+  color: #ffeb3b;
+}
+
+/* Style pour l'élément de bienvenue et de déconnexion */
+.welcome-message {
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.logout-button {
+  padding: 5px 10px;
+  background-color: #ff5722;
+  border: none;
+  border-radius: 5px;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.logout-button:hover {
+  background-color: #d45a21;
+}
+
+/* Animation dynamique pour la barre de navigation */
+@keyframes slideIn {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.navbar {
+  animation: slideIn 0.3s ease-out;
+}

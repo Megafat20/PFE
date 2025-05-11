@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Research Assistant</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            max-width: 600px;
+            margin: auto;
+        }
+        .user-msg {
+            background-color: #DCF8C6;
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            margin-bottom: 0.5rem;
+            max-width: 80%;
+            margin-left: auto;
+        }
+        .bot-msg {
+            background-color: #F1F0F0;
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            margin-bottom: 0.5rem;
+            max-width: 80%;
+            margin-right: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🔬 Assistant IA pour la Recherche Scientifique</h1>
+
+    <div class="chat-container" id="chat-container">
+        {% for msg in messages %}
+            <div class="{{ 'user-msg' if msg['role'] == 'user' else 'bot-msg' }}">
+                {{ msg['content'] }}
+            </div>
+        {% endfor %}
+    </div>
+
+    <form id="message-form">
+        <input type="text" id="user-input" placeholder="Tapez votre question..." required />
+        <button type="submit">Envoyer</button>
+    </form>
+
+    <div>
+        <h3>📁 Téléchargez vos documents</h3>
+        <input type="file" id="file-upload" multiple />
+        <button onclick="uploadFiles()">Télécharger</button>
+    </div>
+
+    <script>
+        // Send message to Flask backend and update chat
+        document.getElementById('message-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const userInput = document.getElementById('user-input').value;
+            const response = await fetch('/send_message', {
+                method: 'POST',
+                body: new URLSearchParams({ user_input: userInput })
+            });
+            const data = await response.json();
+            const messageContainer = document.getElementById('chat-container');
+            messageContainer.innerHTML += `<div class="user-msg">${userInput}</div>`;
+            messageContainer.innerHTML += `<div class="bot-msg">${data.message}</div>`;
+            document.getElementById('user-input').value = '';
+        });
+
+        // Upload files to Flask backend
+        async function uploadFiles() {
+            const files = document.getElementById('file-upload').files;
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files[]', files[i]);
+            }
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (data.success) {
+                alert(`Files uploaded: ${data.files.join(', ')}`);
+            } else {
+                alert('Upload failed');
+            }
+        }
+    </script>
+
+</body>
+</html>
