@@ -9,42 +9,26 @@ const Login = ({ onLogin }) => {
   const [loading, setLoading] = useState(false); // Ajout d'un état de chargement
   const navigate = useNavigate(); // Utiliser useNavigate pour la redirection
 
-  const handleLogin = async (e) => {
+   const handleLogin = async e => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-  
     try {
       const res = await fetch('http://localhost:5000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+
       });
-  
-      if (res.ok) {
-        const data = await res.json();
-        console.log("Token reçu : ", data.token);
-        console.log("Utilisateur reçu : ", data.user);  // Ajout du log pour vérifier les données
-  
-        // Stockage des données utilisateur et du token dans localStorage
-        localStorage.setItem('authToken', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('isLoggedIn', 'true');
-  
-        // Mise à jour de l'état de l'application avec les informations utilisateur
-        onLogin(data.user);
-  
-        // Redirection vers la page ChatApp
-        navigate('/ChatApp');
-      } else {
-        const data = await res.json();
-        setError(data.error || 'Erreur de connexion');
-      }
+      if (!res.ok) throw new Error('Identifiants invalides');
+      const { token, user } = await res.json();
+      // 1) Stocke le token
+      localStorage.setItem('authToken', token);
+      // 2) Passe le user en haut pour instancier le socket après
+      onLogin(user);
+      // 3) Redirige vers le chat
+      navigate('/ChatApp');
     } catch (err) {
       console.error('Erreur réseau:', err);
-      setError('Erreur réseau');
-    } finally {
-      setLoading(false);
+      alert(err.message);
     }
   };
   
