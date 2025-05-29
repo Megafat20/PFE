@@ -1,4 +1,3 @@
 from flask_pymongo import PyMongo
-from .auth import token_required
 
 mongo = PyMongo()

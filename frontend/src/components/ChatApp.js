@@ -26,7 +26,7 @@ function App({ user, setUser }) {
   const [buffer, setBuffer] = useState('');
   const animationRef = useRef(null);
   const navigate = useNavigate();
- 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   // --- Vérification token & récupération user ---
   useEffect(() => {
     const verifyToken = async () => {
@@ -36,7 +36,7 @@ function App({ user, setUser }) {
         return;
       }
       try {
-        const res = await fetch('http://localhost:5000/protected/me', {
+        const res = await fetch('http://localhost:5000/user/me', {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error('Token invalide');
@@ -253,7 +253,7 @@ function App({ user, setUser }) {
   
     const fetchConversation = async () => {
       try {
-        const res = await axios.get(`http://localhost:5000/conversation/${selectedConversationId}`, {
+        const res = await axios.get(`http://localhost:5000/conversations/${selectedConversationId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setChat(res.data.messages || []);
@@ -344,14 +344,23 @@ function App({ user, setUser }) {
 
   // --- JSX ---
   return (
-    <div className="app-layout">
-      <div id="progress-bar"></div>
+    <div className="flex h-screen bg-gray-100  pt-16">
+      <div id="progress-bar" />
+  
+      {/* Bulle de bienvenue */}
       {showWelcomeBubble && (
-        <div className="welcome-bubble">
-          Bienvenue, {user ? user.name : 'utilisateur'} ! 😊
+        <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-blue-50 border border-blue-500 rounded p-5 shadow-lg text-lg font-bold z-50 animate-fadeIn">
+          Bienvenue dans l'assistant IA 👋
         </div>
       )}
-
+        <button
+        className="md:hidden absolute top-4 left-4 z-50 p-2 bg-blue-600 text-white rounded"
+        onClick={() => setSidebarOpen(prev => !prev)}
+        aria-label="Toggle sidebar"
+      >
+        {sidebarOpen ? '✕' : '☰'}
+      </button>
+      {/* Sidebar */}
       <Sidebar
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -360,124 +369,131 @@ function App({ user, setUser }) {
         setShowResultsBubble={setShowResultsBubble}
         searchResults={searchResults}
         onSelectConversation={handleSelectConversation}
+        selectedConversationId={selectedConversationId}
       />
-
-      <div className="chat-container">
-        <div className="chat-header-container">
-          <h2 className="chat-header">🧠 Assistant IA</h2>
+  
+      {/* Chat container */}
+      <div className="flex flex-col flex-grow p-6 bg-white overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-2xl font-semibold text-gray-800">🧠 Assistant IA</h2>
           <select
             onChange={e => setSelectedModel(e.target.value)}
-            className="model-selector"
+            className="border border-gray-300 rounded p-2 text-sm"
             value={selectedModel}
           >
             <option value="llama3">Llama 3</option>
             <option value="deepseek-coder">DeepSeek-coder</option>
-            <option value="mistral">Mistral</option>
+            <option value="mistral:7b-instruct">Mistral</option>
+            <option value="gemini">Gemini</option>
           </select>
         </div>
-
-        <div className="chat-box">
-        {chat.length === 0 ? (
-    <div className="welcome-message" style={{ 
-      padding: '20px', 
-      color: '#666', 
-      fontStyle: 'italic', 
-      textAlign: 'center' 
-    }}>
-      Bienvenue sur MyAI, commencez une nouvelle discussion ou relancez les anciennes.
-    </div>
-  ) : (
-    chat.map((msg, i) => (
-      <div key={i} className={`message ${msg.role || msg.sender}`}>
-        {msg.content || msg.text}
-      </div>
-    ))
-  )}
+  
+        {/* Chat box */}
+        <div className="flex flex-col flex-grow overflow-y-auto space-y-2 mb-4">
+          {chat.length === 0 ? (
+            <div className="p-5 text-center italic text-gray-500">
+              Bienvenue sur MyAI, commencez une nouvelle discussion ou relancez les anciennes.
+            </div>
+          ) : (
+            chat.map((msg, i) => (
+              <div
+                key={i}
+                className={`max-w-[70%] p-3 rounded-lg ${
+                  (msg.role || msg.sender) === 'user'
+                    ? 'self-end bg-blue-100'
+                    : 'self-start bg-gray-200'
+                }`}
+              >
+                {msg.content || msg.text}
+              </div>
+            ))
+          )}
+  
+          {/* Typing indicator */}
           {currentResponse && (
-            <div className="message bot typing-indicator">
-              <span className="dot"></span><span className="dot"></span><span className="dot"></span>
+            <div className="flex items-center space-x-1 self-start px-4 py-2 bg-gray-200 rounded">
+              <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" />
+              <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150" />
+              <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300" />
             </div>
           )}
+  
           <div ref={messagesEndRef} />
         </div>
-
-        <form onSubmit={handleSubmit} className="input-form">
+  
+        {/* Input form */}
+        <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
           <input
             type="text"
             value={userInput}
             onChange={e => setUserInput(e.target.value)}
             placeholder="Posez une question..."
-            className="user-input"
+            className="flex-grow p-2 border border-gray-300 rounded"
             disabled={isUploading}
           />
           <button
             type="submit"
-            className="submit-btn"
+            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
             disabled={!userInput.trim() || currentResponse || isUploading}
           >
             Envoyer
           </button>
           <button
             type="button"
-            className="clear-btn"
             onClick={handleClearChat}
+            className="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
             disabled={isUploading}
-          >🗑️ Effacer
-                  </button>
-    </form>
-
-    <form
-      onSubmit={handleFileUpload}
-      className="upload-form"
-      encType="multipart/form-data"
-    >
-      <input
-        type="file"
-        multiple
-        onChange={handleFilesChange}
-        disabled={isUploading}
-        className="file-input"
-      />
-      <button
-        type="submit"
-        disabled={files.length === 0 || !selectedConversationId || isUploading}
-        className="upload-btn"
-      >
-        {isUploading ? 'Chargement...' : 'Upload'}
-      </button>
-    </form>
-    <h3>Documents Uploadés :</h3>
-    <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-  {uploadedFiles.map((file, index) => (
-    <div key={index} style={{ position: 'relative', display: 'inline-block' }}>
-      <img
-        src={`http://localhost:5000/thumbnails/${file.user_id.$oid || file.user_id}/${file.thumbnail}`}
-        alt={`Thumbnail ${index}`}
-        style={{ width: 100, height: 'auto', borderRadius: 8, border: '1px solid #ccc' }}
-      />
-      <button
-        onClick={() => handleDeleteFile(file._id)}
-        style={{
-          position: 'absolute',
-          top: 2,
-          right: 2,
-          background: 'red',
-          color: 'white',
-          border: 'none',
-          borderRadius: '50%',
-          width: 20,
-          height: 20,
-          cursor: 'pointer'
-        }}
-      >
-        ×
-      </button>
+          >
+            🗑️ Effacer
+          </button>
+        </form>
+  
+        {/* Upload form */}
+        <form
+          onSubmit={handleFileUpload}
+          className="flex items-center space-x-2 mb-4"
+          encType="multipart/form-data"
+        >
+          <input
+            type="file"
+            multiple
+            onChange={handleFilesChange}
+            disabled={isUploading}
+            className="p-2 border border-gray-300 rounded"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            disabled={files.length === 0 || !selectedConversationId || isUploading}
+          >
+            {isUploading ? 'Chargement...' : 'Upload'}
+          </button>
+        </form>
+  
+        {/* Uploaded documents */}
+        <h3 className="text-lg font-medium mb-2">Documents Uploadés :</h3>
+        <div className="flex flex-wrap gap-3">
+          {uploadedFiles.map((file, index) => (
+            <div key={index} className="relative inline-block">
+              <img
+                src={`http://localhost:5000/thumbnails/${file.user_id.$oid || file.user_id}/${file.thumbnail}`}
+                alt={`Thumbnail ${index}`}
+                className="w-24 h-auto rounded border border-gray-300"
+              />
+              <button
+                onClick={() => handleDeleteFile(file._id)}
+                className="absolute top-1 right-1 w-5 h-5 bg-red-600 text-white text-xs rounded-full flex items-center justify-center hover:bg-red-700"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
-  ))}
-</div>
-  </div>
-</div>
-);
+  );
+  
 }
 
 export default App;

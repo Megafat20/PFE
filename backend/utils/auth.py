@@ -1,19 +1,16 @@
 from flask import Blueprint, request, jsonify, current_app
-from flask_pymongo import PyMongo
+from extensions import mongo
 from flask_bcrypt import Bcrypt
 import jwt
 from datetime import datetime, timedelta
 from functools import wraps
 from bson.objectid import ObjectId
 
+from .jwt_utils import decode_jwt
+
 auth_bp = Blueprint('auth', __name__)
 bcrypt = Bcrypt()
 
-def init_auth(app):
-    bcrypt.init_app(app)
-    mongo = PyMongo(app)
-    app.mongo = mongo
-    app.register_blueprint(auth_bp, url_prefix="/auth")
 
 @auth_bp.route("/register", methods=["POST"])
 def register():
@@ -30,9 +27,12 @@ def register():
         return jsonify({"error": "Utilisateur existe déjà"}), 409
 
     hashed_pw = bcrypt.generate_password_hash(password).decode('utf-8')
-    mongo.db.users.insert_one({"name": name, "email": email, "password": hashed_pw})
+    mongo.db.users.insert_one({
+        "name": name,
+        "email": email,
+        "password": hashed_pw
+    })
     return jsonify({"message": "Inscription réussie"}), 201
-
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
@@ -53,17 +53,24 @@ def login():
 
 def token_required(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
-        mongo = current_app.mongo
-        token = request.headers.get("Authorization", "").replace("Bearer ", "")
-        if not token:
-            return jsonify({"error": "Token requis"}), 403
-        try:
-            data = jwt.decode(token, current_app.config["SECRET_KEY"], algorithms=["HS256"])
-            user = mongo.db.users.find_one({"_id": ObjectId(data["user_id"])})
-            if not user:
-                return jsonify({"error": "Utilisateur non trouvé"}), 403
-        except Exception as e:
-            return jsonify({"error": f"Token invalide : {e}"}), 403
+    def wrapper(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            return '', 200
+        auth = request.headers.get('Authorization', None)
+        if not auth or not auth.startswith('Bearer '):
+            return jsonify({'message': 'Token manquant'}), 401
+        token = auth.split()[1]
+        payload = decode_jwt(token)
+        if not payload or 'user_id' not in payload:
+            return jsonify({'message': 'Token invalide ou expiré'}), 401
+        user = mongo.db.users.find_one({'_id': ObjectId(payload['user_id'])})
+        if not user:
+            return jsonify({'message': 'Utilisateur introuvable'}), 404
         return f(user, *args, **kwargs)
-    return decorated
+    return wrapper
+
+
+def init_auth(app):
+    bcrypt.init_app(app)
+    mongo.init_app(app)
+    app.mongo = mongo

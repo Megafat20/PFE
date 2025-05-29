@@ -35,38 +35,55 @@ const Register = ({ onRegister }) => {
   };
 
   return (
-    <div className="auth-container">
-      <h2 className="auth-heading">Inscription</h2>
-      {error && <p className="error">{error}</p>}
-      <form onSubmit={handleRegister} className="auth-form">
-        <input
-          type="text"
-          placeholder="Nom"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          className="auth-input"
-        />
-        <input
-          type="email"
-          placeholder="Adresse email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="auth-input"
-        />
-        <input
-          type="password"
-          placeholder="Mot de passe"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          className="auth-input"
-        />
-        <button type="submit" className="auth-button">S'inscrire</button>
-      </form>
-      <div className="auth-footer">
-        <p>Déjà un compte? <a href="/login">Se connecter</a></p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100 px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+        <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">Créer un compte</h2>
+
+        {error && (
+          <div className="mb-4 text-sm text-red-600 bg-red-100 border border-red-300 rounded-md px-4 py-2">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleRegister} className="space-y-4">
+          <input
+            type="text"
+            placeholder="Nom"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          />
+          <input
+            type="email"
+            placeholder="Adresse email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          />
+          <input
+            type="password"
+            placeholder="Mot de passe"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          />
+          <button
+            type="submit"
+            className="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition duration-300"
+          >
+            S'inscrire
+          </button>
+        </form>
+
+        <p className="mt-6 text-center text-sm text-gray-600">
+          Déjà un compte ?{' '}
+          <a href="/login" className="text-emerald-600 hover:underline">
+            Se connecter
+          </a>
+        </p>
       </div>
     </div>
   );

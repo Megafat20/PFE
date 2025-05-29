@@ -70,91 +70,133 @@ function Sidebar({
     };
 
     return (
-        <div className="sidebar">
-            {/* Barre de recherche */}
-            <h3 className="sidebar-title">📚 Rechercher</h3>
-            <form onSubmit={handleSearchSubmit} className="search-form">
-                <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Ex : deep learning, LLM..."
-                    className="search-input"
-                />
-                <select
+        <aside className="w-80 flex-shrink-0 h-full bg-zinc-900 border-r shadow-lg p-5 space-y-6 overflow-y-auto">
+      
+          {/* Section Recherche */}
+          <div>
+            <h2 className="text-xl font-bold text-slate-200 mb-4 flex items-center gap-2">📚 Recherche</h2>
+      
+            <form onSubmit={handleSearchSubmit} className="space-y-3">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Ex: deep learning, LLM..."
+                className="w-full px-4 py-2 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+      
+              <select
                 value={selectedSource}
                 onChange={(e) => setSelectedSource(e.target.value)}
-                className="custom-select"
-            >
-                <option value="">sélectionné une source</option>
-                <option value="all">Toutes sources</option>
+                className="w-full  px-4 py-2 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Toutes les sources</option>
+                <option value="all">Toutes</option>
                 <option value="arxiv">Arxiv</option>
                 <option value="pubmed">PubMed</option>
                 <option value="semantic_scholar">Semantic Scholar</option>
                 <option value="openalex">OpenAlex</option>
-            </select>
-                <button type="submit" className="search-btn">Rechercher</button>
+              </select>
+      
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
-                    type="button"
-                    className="toggle-bubble-btn"
-                    onClick={() => setShowResultsBubble(prev => !prev)}
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg transition"
                 >
-                    {showResultsBubble ? '🔽 Replier' : '📄 Résultats'}
+                  🔍 Rechercher
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setShowResultsBubble(prev => !prev)}
+                  className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg transition"
+                >
+                  {showResultsBubble ? '🔽 Replier' : '📄 Résultats'}
+                </button>
+              </div>
             </form>
-
-            {/* Historique des conversations */}
-            <h3 className="section-title">💬 Discussions récentes</h3>
-            <button onClick={handleNewConversation} className="btn-new-conversation">
-                ➕ Nouvelle conversation
+          </div>
+      
+          {/* Section Conversations */}
+          <div>
+            <h2 className="text-xl font-bold text-slate-200 mb-3 flex items-center gap-2">💬 Discussions</h2>
+      
+            <button
+              onClick={handleNewConversation}
+              className="w-full mb-3 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg transition"
+            >
+              ➕ Nouvelle conversation
             </button>
-
-            <ul className="conversation-history">
-                {history.map((conversation) => (
-                    <li
-                        key={conversation.id}
-                        className={`conversation-item ${conversation.id === selectedConversationId ? 'selected' : ''}`}
-                        onClick={() => handleConversationClick(conversation.id)}
-                        style={{ cursor: 'pointer' }}
-                    >
-                        <div className="conversation-content">
-                            <strong className="conversation-title">{conversation.title}</strong>
-                            <small className="conversation-date">
-                                {new Date(conversation.created_at).toLocaleString()}
-                            </small>
-                        </div>
-                    </li>
-                ))}
-            </ul>
-
-            {/* Résultats de recherche */}
-            {showResultsBubble && (
-                <div className="floating-results">
-                    <button className="close-btn" onClick={() => setShowResultsBubble(false)}>×</button>
-                    <h4 className="result-title">📄 Résultats</h4>
-                    {searchResults.length > 0 ? (
-                    <ul className="results-list">
-                        {searchResults
-                        .filter(doc => selectedSource === '' || selectedSource === 'all' || doc.source === selectedSource)
-                        .map((doc, idx) => (
-                            <li key={idx}>
-                           <span className="source-icon" title={doc.source.charAt(0).toUpperCase() + doc.source.slice(1).replace('_', ' ')}
-                            style={{ marginRight: '6px' }}>{sourceIcons[doc.source] || sourceIcons.unknown}</span>
-                            <strong>{doc.title}</strong><br />
-                            <a href={doc.url} target="_blank"  rel="noopener noreferrer" className="pdf-link">
-                            📥 Lire le PDF
-                            </a>
-                            <p className="summary">{doc.summary?.slice(0, 100)}...</p>
-                            </li>
-                        ))}
-                    </ul>
-                    ) : (
-                    <p>Aucun résultat trouvé.</p>
-                    )}
+      
+            <ul className="flex flex-col overflow-y-auto max-h-[60vh]">
+            {history.map((conversation) => (
+               <li
+               key={conversation.id}
+               onClick={() => handleConversationClick(conversation.id)}
+               className={`cursor-pointer p-3 rounded mb-1 transition-colors duration-200
+                 ${
+                   conversation.id === selectedConversationId
+                     ? "bg-sky-600 text-white shadow-lg border border-blue-400"
+                     : "hover:bg-sky-600 text-gray-800"
+                 }`}
+             >
+                <div className="flex flex-col">
+                    <strong className="truncate text-gray-100 font-semibold">{conversation.title}</strong>
+                    <small className="text-xs text-gray-300">
+                    {new Date(conversation.created_at).toLocaleString()}
+                    </small>
                 </div>
-            )}
-        </div>
-    );
+                </li>
+            ))}
+            </ul>
+          </div>
+      
+          {/* Résultats de recherche flottants */}
+          {showResultsBubble && (
+            <div className="fixed inset-0 bg-black bg-opacity-30 z-40 flex justify-center items-start pt-24">
+              <div className="bg-white w-full max-w-3xl max-h-[80vh] overflow-y-auto p-6 rounded-lg shadow-2xl relative animate-fadeIn">
+                <button
+                  className="absolute top-3 right-3 text-gray-600 hover:text-red-500 text-2xl font-bold"
+                  onClick={() => setShowResultsBubble(false)}
+                >
+                  ×
+                </button>
+      
+                <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">📄 Résultats de recherche</h3>
+      
+                {searchResults.length > 0 ? (
+                  <ul className="space-y-5">
+                    {searchResults
+                      .filter(doc => selectedSource === '' || selectedSource === 'all' || doc.source === selectedSource)
+                      .map((doc, idx) => (
+                        <li key={idx} className="border-b pb-3">
+                          <div className="flex items-center gap-2 mb-1 text-sm">
+                            <span title={doc.source}>
+                              {sourceIcons[doc.source] || sourceIcons.unknown}
+                            </span>
+                            <span className="font-bold">{doc.title}</span>
+                          </div>
+                          <a
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline text-sm"
+                          >
+                            📥 Lire le PDF
+                          </a>
+                          <p className="text-sm text-gray-600 mt-1">{doc.summary?.slice(0, 100)}...</p>
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-gray-600">Aucun résultat trouvé.</p>
+                )}
+              </div>
+            </div>
+          )}
+        </aside>
+      );
+      
+      
 }
 
 export default Sidebar;
