@@ -2,7 +2,9 @@
 from flask import Blueprint, request, jsonify
 import ollama
 from utils import token_required
-from data_ingestion import search_arxiv,search_openalex,search_pubmed,merge_and_deduplicate,summarize_with_llm
+from data_ingestion import search_arxiv,search_openalex,search_pubmed,merge_and_deduplicate
+from transformers import pipeline
+
 bp_multi = Blueprint("multi_functions", __name__)
 
 def ollama_query(prompt):
@@ -24,10 +26,11 @@ def ollama_query(prompt):
 def create_prompt(template: str, **kwargs) -> str:
     return template.format(**kwargs)
 
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
 @bp_multi.route('/summary', methods=['POST'])
 @token_required
-def summarize(user):
+def summary(user):
     data = request.json
     documents = data.get("documents", "")
     if not documents:
@@ -40,6 +43,25 @@ def summarize(user):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@bp_multi.route('/multi/summarize', methods=['POST'])
+@token_required
+def summarize():
+    data = request.json
+    text = data.get('text', '')
+
+    if not text:
+        return jsonify({"error": "Aucun texte fourni"}), 400
+
+    try:
+        # HuggingFace summarization
+        summary_list = summarizer(text, max_length=150, min_length=40, do_sample=False)
+        summary_text = summary_list[0]['summary_text']
+
+        return jsonify({"summary": summary_text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 @bp_multi.route('/translate', methods=['POST'])
 @token_required
 def translate_text(user):
@@ -56,6 +78,24 @@ def translate_text(user):
         return jsonify({"translation": translation})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# @bp_multi.route('/translate_bulk', methods=['POST'])
+# @token_required
+# def translate_bulk():
+#     data = request.get_json()
+#     texts = data.get("texts", [])
+#     language = data.get("language", "fr")
+
+#     if not texts or not isinstance(texts, list):
+#         return jsonify({"error": "Liste de textes invalide"}), 400
+
+#     try:
+#         translations = translator.translate(texts, target_language=language)
+#         translated_texts = [item["translatedText"] for item in translations]
+#         return jsonify({"translations": translated_texts})
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
 
 
 @bp_multi.route('/generate', methods=['POST'])
@@ -158,3 +198,65 @@ def analyze_trends(user):
         return jsonify({'trend_analysis': analysis})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+@bp_multi.route('/search', methods=['POST'])
+@token_required
+def handle_document_search(user):
+    data = request.get_json()  # ✅ récupération correcte
+    print("Received start_document_search:", data)
+
+    query = data.get("query", "").strip()
+    max_results = int(data.get("max_results", 3))
+
+    if not query:
+        return jsonify({"error": "Aucune requête de recherche fournie"}), 400
+
+    try:
+        # Recherches
+        arxiv_docs = search_arxiv(query, max_results)
+        pubmed_docs = search_pubmed(query, max_results)
+        openalex_docs = search_openalex(query, max_results)
+
+        # Fusion et suppression des doublons
+        merged_docs = merge_and_deduplicate(arxiv_docs, pubmed_docs, openalex_docs)
+        review_summary = generate_literature_summary(merged_docs, query)
+        return jsonify({
+                "documents": merged_docs,
+                "summary": review_summary  # 👈 ajouter la synthèse ici
+            }), 200
+
+    except Exception as e:
+        print("Erreur lors de la recherche :", str(e))
+        return jsonify({"search_error": str(e)}), 500
+    
+def generate_literature_summary(docs, query):
+    from textwrap import shorten
+    import requests
+
+    # Préparer le prompt
+    entries = ""
+    for doc in docs[:5]:
+        entries += f"Title: {doc.get('title')}\n"
+        entries += f"Summary: {shorten(doc.get('summary', ''), width=500)}\n\n"
+
+    prompt = (
+        f"Tu es un expert scientifique. Fais une revue de littérature sur : '{query}'.\n\n"
+        f"Voici quelques articles trouvés :\n\n{entries}\n"
+        "Élabore une synthèse des idées principales, des approches, des tendances et des limites."
+    )
+
+    # Appel à Ollama (DeepSeek ou autre)
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "deepseek-coder:latest",  # ou deepseek-llm
+                "prompt": prompt,
+                "stream": False
+            }
+        )
+        result = response.json()
+        return result.get("response", "")
+    except Exception as e:
+        print("Erreur LLM:", e)
+        return "Synthèse non disponible (erreur lors de l'appel au modèle)."

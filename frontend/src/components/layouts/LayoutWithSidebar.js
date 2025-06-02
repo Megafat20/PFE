@@ -9,7 +9,7 @@ const LayoutWithSidebar = ({ children, user, onLogout }) => {
       <Sidebar2 />
 
       <main
-        className="pt-20 ml-64 min-h-screen bg-gray-50 p-8"
+        className="pt-16 px-0 min-h-screen bg-gray-50 p-8"
         style={{ minHeight: "calc(100vh - 64px)" }}
       >
         {children}

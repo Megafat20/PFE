@@ -25,7 +25,7 @@ const Summary = () => {
         const formData = new FormData();
         formData.append("file", file);
 
-        const res = await fetch("/multi/summarize_pdf", {
+        const res = await fetch("http://localhost:5000/multi/summarize_pdf", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,

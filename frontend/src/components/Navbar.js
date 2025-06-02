@@ -37,7 +37,7 @@ function Navbar({ user, onLogout }) {
           <>
             <li><Link to="/ChatApp" className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 transition">Chat</Link></li>
             <li className="text-blue-600 font-semibold">Bienvenue, {user.name}!</li>
-            <li><Link to="/multifeature" className="hover:text-blue-600 transition">Multi-fonctions</Link></li>
+            <li><Link to="/search" className="hover:text-blue-600 transition">Multi-fonctions</Link></li>
             <li>
               <button onClick={handleLogout} className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded transition">
                 Déconnexion

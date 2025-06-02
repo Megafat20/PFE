@@ -7,7 +7,7 @@ const PlainLayout = ({ children, user, onLogout }) => {
       <div className="min-h-screen flex flex-col">
         <Navbar user={user} onLogout={onLogout} />
         {/* padding-top si navbar fixe */}
-        <main className="flex-grow p-6 pt-16 bg-gray-50">
+        <main className="flex-grow p-3 px-0  bg-gray-50">
           {children}
         </main>
       </div>

@@ -24,7 +24,7 @@ from langchain.schema import Document
 import faiss
 import langid
 # Modules locaux
-from data_ingestion import search_arxiv, search_pubmed, search_openalex, merge_and_deduplicate,summarize_with_llm
+from data_ingestion import search_arxiv, search_pubmed, search_openalex, merge_and_deduplicate
 from utils import mongo, token_required
 from utils.faiss_index import delete_from_index
 from routes import chat_bp, bp_documents, bp_conversations,bp_multi
@@ -132,14 +132,19 @@ def handle_message(data):
     model_name = (data.get("model") or MODEL_NAME).strip()
     uid = connected_users.get(request.sid)
     now = datetime.utcnow().isoformat() + "Z"
+
     if not uid:
         emit("auth_failed", {"message": "❌ Auth requise"})
         return disconnect()
 
     user_input = (data.get("user_input") or "").strip()
     conv_id = data.get("conversation_id")
+
     if not user_input:
         return emit("stream_response", {"token": "⚠️ Message vide"})
+
+    lang_name = "français"  # fallback de base
+    buffer = ""
 
     try:
         # ==== 🔍 Étape 1 : Chargement FAISS ====
@@ -157,64 +162,51 @@ def handle_message(data):
         docs_similaires = store.similarity_search_with_score_by_vector(question_embedding, top_k=5)
 
         print(f"[chat_message] 🔎 Résultats FAISS bruts (top 5) :")
-
         for i, (doc, dist) in enumerate(docs_similaires):
-            print(f"  → Doc #{i+1} | Distance : {dist:.4f} | Extrait : {doc.page_content[:100]}...")
+            print(f"  → Doc #{i+1} | Distance : {float(dist):.4f} | Extrait : {doc.page_content[:100]}...")
 
-        # ==== 🔍 Étape 3 : Filtrage des documents pertinents ====
+        # ==== 🔍 Étape 2 : Filtrage des documents pertinents ====
         threshold = 0.7
         relevant = [
             doc for doc, dist in docs_similaires
-            if dist < threshold and len(doc.page_content.strip()) > 100
+            if float(dist) < threshold and len(doc.page_content.strip()) > 100
         ]
         print(f"[chat_message] ✅ {len(relevant)} documents pertinents trouvés avec seuil {threshold}")
 
-        # --- Détection de langue sécurisée avec fallback ---
+        # ==== 🌐 Détection de langue ====
         try:
             detected_lang, conf = langid.classify(user_input)
             print(f"Langue détectée: {detected_lang} (confiance: {conf:.2f})")
         except Exception:
-            detected_lang = "fr"  # Langue par défaut
+            detected_lang = "fr"
 
-        # Mapping code langue → nom en français
         lang_map = {
             "en": "anglais",
             "fr": "français",
             "es": "espagnol",
-            "al":"allemand",
+            "al": "allemand",
         }
-        if detected_lang not in lang_map:
-            detected_lang = "fr"
-        lang_name = lang_map[detected_lang]
+        lang_name = lang_map.get(detected_lang, "français")
 
-        # ==== 🔁 Étape 4 : Si documents pertinents → RAG ====
+        # ==== 🔁 Étape 3 : RAG ====
         if relevant:
             print("[chat_message] 🤖 RAG activé : génération via RetrievalQA")
-
-            # ⚠️ Message temporaire vers le frontend
             emit("stream_response", {"token": "⏳ Je réfléchis à ta question, un instant..."})
 
             system_prompt = f"Tu es un assistant IA utile. Réponds toujours en {lang_name}."
-            # Limiter à 2 documents pertinents max
-            retriever = store.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": 2}
-            )
+            retriever = store.as_retriever(search_type="similarity", search_kwargs={"k": 2})
 
-            # 🧠 Création de la chaîne QA avec mode map_reduce (meilleur pour gros contextes)
             qa_chain = RetrievalQA.from_chain_type(
                 llm=OllamaLLM(model=model_name, system=system_prompt, temperature=0.3),
                 chain_type="map_reduce",
                 retriever=retriever
             )
 
-            # 🚀 Lancement
             result = qa_chain.invoke(user_input)
             response = remove_think_blocks(result["result"].strip())
             buffer = response
             emit("stream_response", {"token": response})
 
-            # 💾 Sauvegarde conversation
             if conv_id:
                 print(f"[chat_message] 💾 Sauvegarde (RAG) dans conversation {conv_id}")
                 token = data.get("token")
@@ -224,21 +216,14 @@ def handle_message(data):
                     json={
                         "conversation_id": conv_id,
                         "messages": [
-                            {
-                                "role": "user",
-                                "content": user_input,
-                                "timestamp": now
-                            },
-                            {
-                                "role": "assistant",
-                                "content": buffer,
-                                "timestamp": datetime.utcnow().isoformat() + "Z"
-                            }
+                            {"role": "user", "content": user_input, "timestamp": now},
+                            {"role": "assistant", "content": buffer, "timestamp": datetime.utcnow().isoformat() + "Z"}
                         ]
                     },
                     headers=headers
                 )
             return
+
         else:
             print("[chat_message] ⚠️ Aucun document suffisamment pertinent - fallback LLM activé")
 
@@ -246,7 +231,7 @@ def handle_message(data):
         print(f"[RAG] ❌ Erreur: {e}")
         emit("stream_response", {"token": f"⚠️ Erreur RAG: {e}"})
 
-    # ==== 🧠 Fallback vers Ollama seul ====
+    # ==== 🧠 Fallback vers Ollama ====
     try:
         system_prompt = f"Tu es un assistant IA. Réponds en {lang_name}."
         print(f"[chat_message] 🔁 Fallback - génération directe via ({model_name})")
@@ -258,7 +243,6 @@ def handle_message(data):
             ],
             stream=True
         )
-        buffer = ""
         for chunk in stream:
             token = chunk["message"]["content"]
             buffer += token
@@ -273,16 +257,8 @@ def handle_message(data):
                 json={
                     "conversation_id": conv_id,
                     "messages": [
-                        {
-                            "role": "user",
-                            "content": user_input,
-                            "timestamp": now
-                        },
-                        {
-                            "role": "assistant",
-                            "content": buffer,
-                            "timestamp": datetime.utcnow().isoformat() + "Z"
-                        }
+                        {"role": "user", "content": user_input, "timestamp": now},
+                        {"role": "assistant", "content": buffer, "timestamp": datetime.utcnow().isoformat() + "Z"}
                     ]
                 },
                 headers=headers
@@ -293,37 +269,8 @@ def handle_message(data):
         print(f"[LLM Fallback] ⚠️ Exception: {e}\n{traceback.format_exc()}")
         emit("stream_response", {"token": f"⚠️ Erreur LLM: {e}"})
 
-        
-@socketio.on('start_document_search')
-def handle_document_search(data):
-    print("Received start_document_search:", data)
-    query = data.get("query", "").strip()
-    max_results = int(data.get("max_results", 3))
-    token = data.get("token")
 
-
-    if not query:
-        emit("search_error", "La requête est vide.")
-        return
-
-    try:
-        # Recherches
-        arxiv_docs = search_arxiv(query, max_results)
-        pubmed_docs = search_pubmed(query, max_results)
-        openalex_docs = search_openalex(query, max_results)
-
-        # Fusion et suppression des doublons
-        merged_docs = merge_and_deduplicate(arxiv_docs, pubmed_docs, openalex_docs)
-
-        # Émission progressive des documents au client
-        for doc in merged_docs:
-            emit('document', doc)
-            socketio.sleep(0.1)  # Pause pour éviter surcharge réseau
-
-        emit('search_complete')
-
-    except Exception as e:
-        emit("search_error", f"Erreur serveur : {str(e)}")
+    
 if __name__ == "__main__":
         socketio.run(
         app,

@@ -6,6 +6,7 @@ import arxiv
 from flask_socketio import SocketIO
 from Bio import Entrez
 import time
+import xml.etree.ElementTree as ET
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Autoriser CORS si frontend sur un autre port
@@ -38,21 +39,44 @@ def search_pubmed(query="machine learning", max_results=3, save_dir="./data/pubm
     record = Entrez.read(handle)
     ids = record["IdList"]
     results = []
+
     for id_ in ids:
         fetch_handle = Entrez.efetch(db="pubmed", id=id_, rettype="xml", retmode="text")
         article_data = fetch_handle.read()
+        # 💡 Correction ici
+        if isinstance(article_data, bytes):
+            article_data = article_data.decode("utf-8", errors="replace")
+
         file_path = os.path.join(save_dir, f"{id_}.xml")
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(article_data)
+            
+        root = ET.fromstring(article_data)
+        
+        
+        abstract = ""
+        for abstract_text in root.findall(".//AbstractText"):
+            if abstract_text.text:
+                abstract += abstract_text.text.strip() + " "
+                
+                  # 🏷️ Titre
+        title = ""
+        title_elem = root.find(".//ArticleTitle")
+        if title_elem is not None and title_elem.text:
+            title = title_elem.text.strip()
+        else:
+            title = f"PubMed Article {id_}"
         doc = {
-            "title": f"PubMed Article {id_}",
+             "title": title,
             "file_path": file_path,
             "url": f"https://pubmed.ncbi.nlm.nih.gov/{id_}",
             "source": "pubmed",
-            "summary": ""
+            "summary": abstract.strip() if abstract else "Résumé non disponible"
         }
+
         socketio.emit('document', doc)
         results.append(doc)
+
     return results
 
 # Fonction Semantic Scholar (commentée - à activer si besoin)
@@ -98,34 +122,51 @@ def search_pubmed(query="machine learning", max_results=3, save_dir="./data/pubm
 #         print("Échec après plusieurs tentatives.")
 #     return results
 
+def reconstruct_abstract(inverted_index):
+    if not isinstance(inverted_index, dict):
+        return "Résumé non disponible"
+
+    word_positions = []
+    for word, positions in inverted_index.items():
+        for pos in positions:
+            word_positions.append((pos, word))
+
+    sorted_words = [word for _, word in sorted(word_positions)]
+    return " ".join(sorted_words)
+
+
 def search_openalex(query="machine learning", max_results=3):
-    base_url = "https://api.openalex.org/works"
-    response = requests.get(base_url, params={"search": query, "per_page": max_results})
+    url = f"https://api.openalex.org/works?search={query}&per-page={max_results}"
+    response = requests.get(url)
     results = []
-    if response.status_code == 200:
-        for item in response.json().get("results", []):
-            doi = item.get("doi")
-            if doi:
-                unpaywall_url = f"https://api.unpaywall.org/v2/{doi}?email={UNPAYWALL_EMAIL}"
-                up_resp = requests.get(unpaywall_url)
-                if up_resp.status_code == 200:
-                    data = up_resp.json()
-                    best_oa_location = data.get("best_oa_location")
-                    pdf_url = best_oa_location.get("url_for_pdf") if best_oa_location else None
-                    if pdf_url:
-                        # abstract peut être une structure inversée, on évite erreur
-                        abstract = item.get("abstract_inverted_index", "")
-                        if not isinstance(abstract, str):
-                            abstract = ""
-                        doc = {
-                            "title": item.get("title", "No title"),
-                            "url": f"https://doi.org/{doi}",
-                            "file_path": pdf_url,
-                            "summary": "",
-                            "source": "OpenAlex"
-                        }
-                        socketio.emit('document', doc)
-                        results.append(doc)
+
+    if response.status_code != 200:
+        print("Erreur OpenAlex:", response.text)
+        return results
+
+    data = response.json()
+    for item in data.get('results', []):
+        title = item.get("title", "Titre non disponible")
+        url = item.get("id", "#")
+        authors = [auth["author"]["display_name"] for auth in item.get("authorships", [])]
+        abstract_data = item.get("abstract_inverted_index")
+
+        summary = reconstruct_abstract(abstract_data) if abstract_data else "Résumé non disponible"
+        primary_location = item.get("primary_location") or {}
+        source = primary_location.get("source") or {}
+        pdf_url = source.get("url") or url
+        doc = {
+            "title": title,
+            "authors": authors,
+            "summary": summary,
+            "pdf_url": pdf_url,
+            "url": url,
+            "source": "openalex"
+        }
+
+        socketio.emit('document', doc)
+        results.append(doc)
+
     return results
 
 def merge_and_deduplicate(*doc_sources):
@@ -146,18 +187,4 @@ def merge_and_deduplicate(*doc_sources):
     merged.sort(key=lambda d: d.get('score', 0), reverse=True)
     return merged
 
-def summarize_with_llm(text, model="llama3"):
-    prompt = f"Fais un résumé scientifique de ce texte :\n\n{text}\n\nRésumé :"
-    try:
-        response = requests.post("http://localhost:11434/api/generate", json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False
-        })
-        if response.ok:
-            return response.json().get("response", "").strip()
-        else:
-            return f"Erreur : {response.text}"
-    except requests.exceptions.RequestException as e:
-        return f"Erreur de connexion à Ollama : {e}"
 
