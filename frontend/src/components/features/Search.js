@@ -1,7 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Search as SearchIcon, Globe, Loader2 } from "lucide-react";
+import ProgressBar from "../ProgressBar";
+import ChatModal from "./ChatModal";
+import DocumentInsightModal from "./DocumentInsightModal";
+import LoadingOverlay from "../LoadingOverlay";
+import { toast } from 'react-toastify';
 
-// Fonction simple de distance cosinus pour similitude (pour regroupement)
+// Fonction de similarité cosinus
 function cosineSimilarity(vecA, vecB) {
   const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
   const magA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
@@ -9,8 +14,7 @@ function cosineSimilarity(vecA, vecB) {
   return dotProduct / (magA * magB);
 }
 
-// Fonction simple de création d'embeddings dummy (à remplacer par ton API)
-// Ici on fait juste une transformation en vecteur de longueur fixe avec char codes, pour l'exemple
+// Dummy embedding
 function textToVector(text, length = 50) {
   const vec = new Array(length).fill(0);
   for (let i = 0; i < Math.min(text.length, length); i++) {
@@ -25,21 +29,56 @@ const Search = () => {
   const [translatedResults, setTranslatedResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [translating, setTranslating] = useState(false);
+  const [translationProgress, setTranslationProgress] = useState(0);
   const [error, setError] = useState(null);
   const [language, setLanguage] = useState("fr");
   const [modalContent, setModalContent] = useState(null);
-  const [summary, setSummary] = useState(""); // Synthèse globale
-  const [citations, setCitations] = useState([]); // Liste citations simples
+  const [summary, setSummary] = useState("");
+  const [citations, setCitations] = useState([]);
   const token = localStorage.getItem("authToken");
+  const [searchHistory, setSearchHistory] = useState(() => {
+    return JSON.parse(localStorage.getItem("searchHistory")) || [];
+  });
+  const [showHistory, setShowHistory] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [chatDoc, setChatDoc] = useState(null);
+  const [documents, setDocuments] = useState([]);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [isIndexing, setIsIndexing] = useState(false);
+  const [loadingFavorites, setLoadingFavorites] = useState({}); 
+  const [selectedFullText, setSelectedFullText] = useState("");
+  const [selectedChunks, setSelectedChunks] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("");
+  const allSuggestions = [
+    "Large Language Models for Scientific Research",
+    "Deep Learning for Medical Imaging",
+    "AI in Agriculture",
+    "Natural Language Processing in Education",
+    "Graph Neural Networks",
+    "Explainable AI",
+    "Reinforcement Learning",
+    "Climate Change Modeling with AI",
+    "Biomedical Signal Processing",
+    "Federated Learning in Healthcare",
+  ];
+  const inputRef = useRef(null);
 
-  // Recherche classique
-  const handleSearch = async () => {
-    if (!query.trim()) return;
+  const updateSearchHistory = (newQuery) => {
+    if (!newQuery.trim()) return;
+    const updated = [
+      newQuery,
+      ...searchHistory.filter((q) => q !== newQuery),
+    ].slice(0, 5);
+    setSearchHistory(updated);
+    localStorage.setItem("searchHistory", JSON.stringify(updated));
+  };
+
+  const handleSearch = async (searchTerm = query) => {
+    if (!searchTerm.trim()) return;
     setLoading(true);
     setError(null);
-    setResults([]);
-    setTranslatedResults([]);
-    setSummary("");
     setCitations([]);
 
     try {
@@ -50,7 +89,7 @@ const Search = () => {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          query: query.trim(),
+          query: searchTerm.trim(),
           max_results: 10,
           llm: true,
         }),
@@ -59,16 +98,37 @@ const Search = () => {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || data.search_error || "Erreur lors de la recherche");
+        setError(
+          data.error || data.search_error || "Erreur lors de la recherche"
+        );
       } else {
-        setResults(data.documents || []);
-        setTranslatedResults(data.documents || []);
+        const unifiedDocs = (data.documents || []).map((doc) => ({
+          ...doc,
+          _id: doc._id || doc.url || doc.title,
+          translatedTitle: doc.title,
+          translatedSummary: doc.summary || doc.abstract || "",
+          indexed: doc.indexed || false,
+        }));
+
+        setResults(unifiedDocs);
+        setTranslatedResults(unifiedDocs);
+        setDocuments(unifiedDocs);
         setSummary(data.summary || "");
-        // Préparer citations simples
+
         const cits = (data.documents || []).map(
-          (doc, i) => `${i + 1}. ${doc.title}${doc.authors ? " - " + doc.authors.join(", ") : ""}`
+          (doc, i) =>
+            `${i + 1}. ${doc.title}${
+              doc.authors ? " - " + doc.authors.join(", ") : ""
+            }`
         );
         setCitations(cits);
+        await new Promise((r) => setTimeout(r, 1000));
+
+        updateSearchHistory(searchTerm);
+        setQuery(searchTerm);
+        setShowHistory(false);
+        setShowSuggestions(false);
+        setDocuments(data.documents || []);
       }
     } catch (err) {
       setError("Erreur de communication avec le serveur");
@@ -77,32 +137,84 @@ const Search = () => {
     }
   };
 
-  // Traduction des résultats
+  useEffect(() => {
+    if (query.length > 1) {
+      const filtered = allSuggestions.filter((s) =>
+        s.toLowerCase().includes(query.toLowerCase())
+      );
+      setSuggestions(filtered);
+    } else {
+      setSuggestions([]);
+    }
+  }, [query]);
+
+  const onFocus = () => {
+    setShowHistory(true);
+    setShowSuggestions(true);
+  };
+
+  const onBlur = () => {
+    setTimeout(() => {
+      setShowHistory(false);
+      setShowSuggestions(false);
+    }, 200);
+  };
+
+  useEffect(() => {
+    let interval;
+    if (translating) {
+      setTranslationProgress(0);
+      interval = setInterval(() => {
+        setTranslationProgress((old) => {
+          if (old >= 90) return 90;
+          return old + 1;
+        });
+      }, 100);
+    } else {
+      setTranslationProgress(100);
+      const timeout = setTimeout(() => setTranslationProgress(0), 500);
+      return () => clearTimeout(timeout);
+    }
+    return () => clearInterval(interval);
+  }, [translating]);
+
   const translateResults = async (lang) => {
     if (results.length === 0) return;
     setTranslating(true);
 
-    const texts = results.map(
+    const textsToTranslate = results.map(
       (doc) => `${doc.title}\n\n${doc.summary || doc.abstract || ""}`
     );
+    if (summary) textsToTranslate.push(summary);
+    if (citations.length > 0) textsToTranslate.push(...citations);
 
     try {
-      const res = await fetch("http://localhost:5000/multi/translate_bulk", {
+      const res = await fetch("http://localhost:5000/multi/translate_texte", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ texts, language: lang }),
+        body: JSON.stringify({ text: textsToTranslate, language: lang }),
       });
 
       const data = await res.json();
+
       if (data.translations) {
-        const newResults = results.map((doc, i) => ({
-          ...doc,
-          translatedText: data.translations[i],
-        }));
-        setTranslatedResults(newResults);
+        const newDocuments = documents.map((doc, i) => {
+          const translatedText = data.translations[i];
+          const [translatedTitle, ...translatedSummaryParts] =
+            translatedText.split("\n\n");
+          const translatedSummary = translatedSummaryParts.join("\n\n");
+          console.log(doc);
+          return {
+            ...doc,
+            translatedTitle: translatedTitle || doc.title,
+            translatedSummary:
+              translatedSummary || doc.summary || doc.abstract || "",
+          };
+        });
+        setDocuments(newDocuments);
       } else {
         alert("Erreur dans la traduction");
       }
@@ -113,7 +225,6 @@ const Search = () => {
     setTranslating(false);
   };
 
-  // Synthèse globale / Literature Review
   const handleLiteratureReview = async () => {
     if (results.length === 0) {
       alert("Aucun document à synthétiser");
@@ -150,16 +261,13 @@ const Search = () => {
     }
   };
 
-  // Regroupement simple par similarité (démonstration, fait sur résumé)
   const groupedResults = () => {
     if (translatedResults.length <= 1) return [translatedResults];
 
-    // Calcul embeddings simples
     const embeddings = translatedResults.map((doc) =>
       textToVector(doc.translatedText || doc.summary || doc.abstract || "")
     );
 
-    // Regroupement basique : on crée des clusters par similarité > 0.8
     const clusters = [];
     const assigned = new Array(translatedResults.length).fill(false);
 
@@ -190,155 +298,503 @@ const Search = () => {
   const closeModal = () => {
     setModalContent(null);
   };
+  const handleDownloadPDF = (doc) => {
+    const link = document.createElement("a");
+    link.href = doc.pdf_url;
+    link.download = `${doc.title || "document"}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
+
+
+  function arxivToPdfUrl(url) {
+    if (url.includes("arxiv.org/abs/")) {
+      return url.replace("arxiv.org/abs/", "arxiv.org/pdf/") + ".pdf";
+    }
+    return url;
+  }
+
+  const openInsightModal = (doc, chunks, fullText) => {
+    setChatDoc(doc);
+    setSelectedChunks(chunks);
+    setSelectedFullText(fullText);
+    setShowModal(true);
+  };
+  
+  const closeInsightModal = () => {
+    setShowModal(false);
+    setChatDoc(null);
+    setSelectedChunks([]);
+    setSelectedFullText("");
+  };
+  
+  // 🔄 Fusionne ta logique actuelle dans cette méthode
+  const handleQuestionDocument = async (doc) => {
+    setIsIndexing(true);
+    setLoadingProgress(0);
+  
+    try {
+      const token = localStorage.getItem("authToken");
+  
+      let fileUrl = doc.url;
+      let filename =
+        (doc.filename || doc.title || "document")
+          .replace(/\s+/g, "_")
+          .replace(/\.pdf$/, "") + ".pdf";
+  
+      if (fileUrl.includes("arxiv.org/abs/")) {
+        fileUrl = fileUrl.replace("/abs/", "/pdf/") + ".pdf";
+      }
+  
+      const simulateProgress = () => {
+        setLoadingProgress((prev) => {
+          if (prev >= 100) return 100;
+          const next = prev + Math.floor(Math.random() * 15) + 5;
+          return next > 100 ? 100 : next;
+        });
+      };
+      const progressInterval = setInterval(simulateProgress, 400);
+  
+      const res = await fetch("http://localhost:5000/download_external_document", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          file_url: fileUrl,
+          filename,
+          source: doc.source || "unknown",
+          original_url: doc.url,
+        }),
+      });
+  
+      clearInterval(progressInterval);
+      setLoadingProgress(100);
+  
+      const data = await res.json();
+      if (!res.ok || !data.document) {
+        alert(data.error || "Erreur lors de l’indexation");
+      } else {
+        // Ensuite, appelle automatiquement handleShowChunks
+        await handleShowChunks(data.document);
+      }
+    } catch (err) {
+      alert("❌ Erreur : " + err.message);
+    }
+  
+    setIsIndexing(false);
+    setLoadingProgress(0);
+  };
+  
+  const handleShowChunks = async (doc) => {
+    const token = localStorage.getItem("authToken");
+    if (!token) return alert("Token non trouvé");
+  
+    const documentId = arxivToPdfUrl(doc._id); // utile si ton backend accepte les URLs
+  
+    try {
+      setIsIndexing(true);
+      setLoadingProgress(0);
+      setLoadingMessage("Préparation du document en cours...");
+  
+      const chunksRes = await fetch("http://localhost:5000/document_chunks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          document_id: documentId,
+          filename: doc.title || "document.pdf",
+          source: doc.source || "unknown",
+        }),
+      });
+  
+      if (!chunksRes.ok) {
+        const errData = await chunksRes.json();
+        throw new Error(errData.error || "Erreur lors de la récupération des extraits");
+      }
+  
+      const chunksData = await chunksRes.json();
+  
+      // Ouvre le modal fusionné avec tous les éléments nécessaires
+      openInsightModal(doc, chunksData.chunks || [], chunksData.full_text || "");
+    } catch (err) {
+      alert(err.message);
+    }
+  
+    setIsIndexing(false);
+    setLoadingProgress(0);
+    setLoadingMessage("");
+  };
+  const handleFindSimilarArticles = async (doc) => {
+
+  };
+  const handleAddToLibrary = async (doc) => {
+    setLoadingFavorites((prev) => ({ ...prev, [doc._id]: true }));
+    try {
+      const token = localStorage.getItem("authToken");
+      const response = await fetch("http://localhost:5000/api/favorites", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ documentId: doc._id }),
+      });
+
+      if (!response.ok) throw new Error("Échec de l'ajout aux favoris.");
+      toast.success("Ajouté aux favoris !");
+    } catch (error) {
+      toast.error("Impossible d'ajouter aux favoris.");
+    
+    } finally {
+      setLoadingFavorites((prev) => ({ ...prev, [doc._id]: false }));
+    }
+  };
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
-      <h1 className="text-4xl font-bold mb-8 text-blue-700 tracking-tight">
-        🔎 Recherche scientifique assistée par IA - Literature Review
-      </h1>
-
-      {/* Langue + Barre de recherche */}
-      <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-        <div className="flex items-center gap-2 w-full md:w-1/3">
-          <Globe className="text-blue-600" />
-          <select
-            value={language}
-            onChange={async (e) => {
-              const lang = e.target.value;
-              setLanguage(lang);
-              if (results.length > 0) {
-                setTranslating(true);
-                await translateResults(lang);
-                setTranslating(false);
-              }
-            }}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500"
-            disabled={loading || translating}
-          >
-            <option value="">Langue</option>
-            <option value="fr">Français</option>
-            <option value="en">Anglais</option>
-            <option value="es">Espagnol</option>
-            <option value="de">Allemand</option>
-            <option value="it">Italien</option>
-          </select>
-        </div>
-
-        <div className="flex-grow w-full md:w-2/3 flex items-center gap-2">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            placeholder="Ex: Large Language Models for Scientific Research"
-            className="flex-grow border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg"
-            disabled={loading || translating}
-          />
-          <button
-            onClick={handleSearch}
-            disabled={loading || translating}
-            className="flex items-center gap-2 px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <SearchIcon />}
-            {loading ? "Recherche..." : "Rechercher"}
-          </button>
-        </div>
-      </div>
-
-      {/* Bouton Literature Review / Synthèse globale */}
-      <div className="mb-6">
-        <button
-          onClick={handleLiteratureReview}
-          disabled={loading || translating || results.length === 0}
-          className="px-6 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold transition disabled:opacity-50"
-        >
-          Générer une synthèse globale (Literature Review)
-        </button>
-      </div>
-
-      {/* Erreur */}
-      {error && (
-        <div className="text-red-600 font-medium mb-4 border-l-4 border-red-600 pl-4 py-2 bg-red-50 rounded">
-          {error}
-        </div>
+    <>
+      {(loading || translating) && (
+        <ProgressBar
+          progress={translating ? translationProgress : loading ? 100 : 0}
+        />
       )}
+   {isIndexing && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex flex-col justify-center items-center z-50">
+    <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-20 w-20 mb-4"></div>
+    <p className="text-white text-lg">{loadingMessage}</p>
+  </div>
+)}
+      <div className="w-full px-4 py-6 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+        {/* Titre principal */}
+        <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-6 sm:mb-8 text-blue-700 tracking-tight text-center sm:text-left">
+          🔎 Recherche scientifique assistée par IA - Literature Review
+        </h1>
 
-      {/* Synthèse globale */}
-      {summary && (
-        <div className="mb-8 p-6 bg-gray-100 rounded-lg border border-gray-300 text-gray-800 whitespace-pre-line">
-          <h2 className="text-2xl font-semibold mb-4 text-green-700">
-            Synthèse globale (Literature Review)
-          </h2>
-          {summary}
-        </div>
-      )}
+        <div className="w-full font-sans">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 mb-6">
+            {/* Sélecteur de langue */}
+            <div className="flex items-center gap-2 w-full md:w-1/4">
+              <label htmlFor="language-select" className="sr-only">
+                Sélectionner la langue
+              </label>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-4 py-2 rounded-md border border-gray-400 text-gray-700 font-medium hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                onClick={() =>
+                  document.getElementById("language-select").focus()
+                }
+              >
+                <Globe className="w-5 h-5 text-gray-600" />
+              </button>
 
-      {/* Citations */}
-      {citations.length > 0 && (
-        <div className="mb-8 p-6 bg-white rounded-lg border border-gray-300 text-gray-700">
-          <h3 className="text-xl font-semibold mb-3 text-blue-700">Citations des documents</h3>
-          <ul className="list-decimal list-inside max-h-48 overflow-y-auto">
-            {citations.map((cit, i) => (
-              <li key={i} className="mb-1">
-                {cit}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Résultats regroupés */}
-      {translatedResults.length > 0 && (
-        <div>
-          <h2 className="text-3xl font-bold mb-6 text-blue-800">
-            Résultats regroupés par similarité thématique
-          </h2>
-          {groupedResults().map((cluster, idx) => (
-            <div key={idx} className="mb-8">
-              <h3 className="text-2xl font-semibold mb-4">
-                Groupe {idx + 1} ({cluster.length} documents)
-              </h3>
-              {cluster.map((doc, i) => (
-                <div
-                  key={i}
-                  onClick={() => openModal(doc.translatedText || doc.summary || doc.abstract || "")}
-                  className="mb-3 p-4 border rounded-lg cursor-pointer hover:bg-blue-50"
-                  title="Cliquez pour voir le résumé complet"
-                >
-                  <h4 className="text-lg font-semibold text-blue-700">
-                    {doc.title}
-                  </h4>
-                  <p className="text-gray-700 line-clamp-3">
-                    {doc.translatedText || doc.summary || doc.abstract}
-                  </p>
-                </div>
-              ))}
+              <select
+                id="language-select"
+                value={language}
+                onChange={async (e) => {
+                  const lang = e.target.value;
+                  setLanguage(lang);
+                  if (results.length > 0) {
+                    setTranslating(true);
+                    await translateResults(lang);
+                    setTranslating(false);
+                  }
+                }}
+                className="w-full rounded-md border border-gray-400 text-gray-800 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                disabled={loading || translating}
+              >
+                <option value="">Langue</option>
+                <option value="en">Anglais</option>
+                <option value="fr">Français</option>
+                <option value="ar">Arabe</option>
+                <option value="de">Allemand</option>
+                <option value="it">Italien</option>
+              </select>
             </div>
-          ))}
-        </div>
-      )}
 
-      {/* Modal pour afficher le résumé complet */}
-      {modalContent && (
-        <div
-          onClick={closeModal}
-          className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="max-w-3xl bg-white p-6 rounded-lg shadow-lg max-h-[80vh] overflow-y-auto whitespace-pre-line"
-          >
-            <button
-              onClick={closeModal}
-              className="mb-4 font-bold text-red-600 hover:underline"
-            >
-              Fermer
-            </button>
-            {modalContent}
+            {/* Barre de recherche */}
+            <div className="flex-grow w-full md:w-3/4 relative">
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                onFocus={onFocus}
+                onBlur={onBlur}
+                placeholder="Ex: Large Language Models for Scientific Research"
+                className="w-full rounded-full border border-gray-300 bg-white px-6 py-4 text-base sm:text-lg text-gray-900 placeholder-gray-400 shadow-md focus:outline-none focus:ring-4 focus:ring-blue-400 focus:border-blue-400 transition"
+                aria-label="Champ de recherche"
+                disabled={loading}
+                autoComplete="off"
+              />
+
+              {/* Icone */}
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center">
+                {loading ? (
+                  <span className="animate-spin h-6 w-6 border-4 border-blue-500 border-t-transparent rounded-full"></span>
+                ) : (
+                  <button
+                    onClick={() => handleSearch()}
+                    disabled={loading || query.trim() === ""}
+                    className="text-gray-700 hover:text-gray-900 focus:outline-none"
+                    aria-label="Lancer la recherche"
+                    title="Lancer la recherche"
+                  >
+                    <SearchIcon className="w-6 h-6" />
+                  </button>
+                )}
+              </div>
+
+              {/* Suggestions glassmorphism */}
+              {showSuggestions && suggestions.length > 0 && (
+                <ul
+                  className="absolute top-full left-0 right-0 mt-3 bg-white/60 backdrop-blur-sm border border-blue-300 rounded-2xl shadow-lg max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-blue-400 scrollbar-track-blue-100 z-50"
+                  role="listbox"
+                  aria-label="Suggestions de recherche"
+                >
+                  {suggestions.map((s, i) => (
+                    <li
+                      key={i}
+                      role="option"
+                      aria-selected="false"
+                      className="px-6 py-3 hover:bg-blue-100 cursor-pointer text-blue-900 font-medium select-none transition"
+                      onMouseDown={() => handleSearch(s)}
+                    >
+                      🔍 {s}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Historique glassmorphism */}
+              {showHistory && searchHistory.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-3 bg-white/50 backdrop-blur-md border border-blue-200 rounded-2xl shadow-xl max-h-72 overflow-y-auto scrollbar-thin scrollbar-thumb-blue-300 scrollbar-track-blue-50 z-40">
+                  <div className="p-3 text-sm text-blue-600 font-semibold border-b border-blue-300 select-none">
+                    🕘 Historique de recherche
+                  </div>
+                  <ul>
+                    {searchHistory.map((item, index) => (
+                      <li
+                        key={index}
+                        onMouseDown={() => {
+                          setQuery(item);
+                          handleSearch(item);
+                        }}
+                        className="cursor-pointer px-6 py-3 hover:bg-blue-200 text-blue-800 font-semibold select-none transition"
+                      >
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      )}
-    </div>
+
+        {/* Bouton Literature Review */}
+        <div className="mb-6">
+          <button
+            onClick={handleLiteratureReview}
+            disabled={loading || translating || results.length === 0}
+            className="px-6 py-3 rounded-md bg-neutral-800 text-white hover:bg-neutral-700 font-medium transition disabled:opacity-50"
+            title="Analyser les résultats et générer une synthèse"
+          >
+            Générer une synthèse globale
+          </button>
+        </div>
+
+        {/* Erreur */}
+        {error && (
+          <div className="text-red-600 font-medium mb-4 border-l-4 border-red-600 pl-4 py-2 bg-red-50 rounded">
+            {error}
+          </div>
+        )}
+
+        {/* Synthèse globale */}
+        {summary && (
+          <div className="mb-8 p-6 bg-gray-100 rounded-lg border border-gray-300 text-gray-800 whitespace-pre-line">
+            <h2 className="text-2xl font-semibold mb-4 text-green-700">
+              Synthèse globale (Literature Review)
+            </h2>
+            {summary}
+          </div>
+        )}
+
+        {/* Citations */}
+        {citations.length > 0 && (
+          <div className="mb-8 p-6 bg-white rounded-lg border border-gray-300 text-gray-700">
+            <h3 className="text-xl font-semibold mb-3 text-blue-700">
+              Citations des documents
+            </h3>
+            <ul className="list-decimal list-inside max-h-48 overflow-y-auto">
+              {citations.map((cit, i) => (
+                <li key={i} className="mb-1">
+                  {cit}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Résultats regroupés */}
+        {translatedResults.length > 0 && (
+          <div>
+            <h2 className="text-3xl font-bold mb-6 text-blue-800">
+              Résultats regroupés par similarité thématique
+            </h2>
+            {groupedResults().map((cluster, idx) => (
+              <div key={idx} className="mb-8">
+                <h3 className="text-2xl font-semibold mb-4">
+                  Groupe {idx + 1} ({cluster.length} documents)
+                </h3>
+
+                {cluster.map((doc, i) => (
+                  <div
+                    key={doc._id || doc.url || doc.title || i}
+                    onClick={() =>
+                      openModal(
+                        doc.translatedText || doc.summary || doc.abstract || ""
+                      )
+                    }
+                    className="mb-4 p-5 border rounded-xl hover:bg-blue-50 hover:shadow-md transition cursor-pointer flex flex-col md:flex-row justify-between items-start gap-4"
+                    title="Cliquez pour voir le résumé complet"
+                  >
+                    {/* Partie gauche : contenu texte */}
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-xl font-bold text-gray-900 mb-2 break-words">
+                        {doc.translatedTitle || doc.title}
+                      </h4>
+
+                      <p className="text-gray-700 text-sm leading-relaxed line-clamp-4 break-words">
+                        {doc.translatedSummary || doc.summary || doc.abstract}
+                      </p>
+
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openModal(doc.summary);
+                          }}
+                          title="Voir les détails"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200 transition text-sm"
+                        >
+                          🔍 <span className="hidden sm:inline">Détails</span>
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownloadPDF(doc);
+                          }}
+                          title="Télécharger le PDF"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-purple-100 text-purple-700 hover:bg-purple-200 transition text-sm"
+                        >
+                          ⬇️{" "}
+                          <span className="hidden sm:inline">Télécharger</span>
+                        </button>
+                        <button
+                        onClick={(e) => {e.stopPropagation();
+                          handleAddToLibrary(doc);}}
+                        disabled={loadingFavorites[doc._id]}
+                        className={`px-3 py-1.5 rounded text-sm ${
+                          loadingFavorites[doc._id]
+                            ? "bg-gray-400 cursor-not-allowed"
+                            : "bg-yellow-400 text-yellow-900 hover:bg-yellow-500"
+                        } transition`}
+                      >
+                        {loadingFavorites[doc._id]
+                          ? "Ajout en cours..."
+                          : "⭐ Ajouter aux favoris"}
+                      </button>
+                      </div>
+                    
+                    </div>
+
+                    {/* Partie droite : actions secondaires */}
+                    <div className="flex flex-col gap-2 shrink-0 md:items-end w-full md:w-auto">
+                      {doc.url && (
+                        <a
+                          href={doc.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 transition flex items-center gap-2 text-sm w-full md:w-auto justify-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          📄 Lire PDF
+                        </a>
+                      )}
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuestionDocument(doc);
+                        }}
+                        className="px-3 py-2 bg-yellow-100 text-yellow-800 rounded hover:bg-yellow-200 transition flex items-center gap-2 text-sm w-full md:w-auto justify-center"
+                        title="Afficher les passages utilisés par l'IA et démarrer le chat"
+                      >
+                        💬 Discussion & Extraits
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleFindSimilarArticles(doc);
+                        }}
+                        className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded hover:bg-indigo-200 transition flex items-center gap-2 text-sm w-full md:w-auto justify-center"
+                        title="Rechercher des articles similaires"
+                      >
+                        🧪 Articles similaires
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+
+          {showModal && chatDoc && (
+            <DocumentInsightModal
+              isOpen={showModal}
+              onClose={closeInsightModal}
+              document={chatDoc}
+              chunks={selectedChunks}
+              fullText={selectedFullText}
+            />
+          )}
+
+
+          </div>
+          
+        )}
+
+        {/* Modal */}
+        {modalContent && (
+          <div
+            onClick={closeModal}
+            className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50"
+          >
+            <div
+              role="dialog"
+              tabIndex={-1}
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-3xl bg-white p-6 rounded-lg shadow-lg max-h-[80vh] overflow-y-auto whitespace-pre-line"
+            >
+              <button
+                onClick={closeModal}
+                className="mb-4 font-bold text-red-600 hover:underline"
+              >
+                Fermer
+              </button>
+              {modalContent}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 };
 

@@ -28,3 +28,5 @@ faiss-cpu
 langchain
 langchain-community
 langchain-ollama
+sentencepiece
+

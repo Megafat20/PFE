@@ -5,16 +5,26 @@ import Navbar from "../Navbar";
 const LayoutWithSidebar = ({ children, user, onLogout }) => {
   return (
     <>
-      <Navbar user={user} onLogout={onLogout} />
-      <Sidebar2 />
+    <div className="flex flex-col min-h-screen">
+    {/* Navbar fixe en haut */}
+    <Navbar user={user} onLogout={onLogout} />
 
+    <div className="flex flex-1 min-h-0  pt-16">
+      {/* Sidebar à gauche */}
+      <div className="hidden md:block w-64 bg-white border-r">
+        <Sidebar2 />
+      </div>
+
+      {/* Contenu principal */}
       <main
-        className="pt-16 px-0 min-h-screen bg-gray-50 p-8"
+        className="flex-1 bg-gray-50 p-4 sm:p-6 md:p-8 overflow-auto"
         style={{ minHeight: "calc(100vh - 64px)" }}
       >
         {children}
       </main>
-    </>
+    </div>
+  </div>
+  </>
   );
 };
 

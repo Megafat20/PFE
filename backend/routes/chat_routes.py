@@ -3,8 +3,17 @@ from bson import ObjectId
 from datetime import datetime
 from extensions import mongo
 from utils import token_required
+from langchain.vectorstores import FAISS
+from langchain.embeddings import OllamaEmbeddings
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+import ollama
+import os
+
 
 chat_bp = Blueprint('chat', __name__)
+
+EXTERNAL_UPLOAD_FOLDER = "./external_uploads"
 
 @chat_bp.route("/save_chat", methods=["POST"])
 @token_required
@@ -40,3 +49,61 @@ def save_chat(user):
             )
 
     return jsonify({"status": "ok"})
+
+
+@chat_bp.route("/chat_document", methods=["POST"])
+@token_required
+def chat_document(user):
+    data = request.get_json()
+    document_id = data.get("document_id")
+    question = data.get("question", "").strip()
+
+    if not document_id or not question:
+        return jsonify({"error": "document_id et question requis"}), 400
+
+    user_folder = os.path.join(EXTERNAL_UPLOAD_FOLDER, str(user["_id"]))
+    index_path = os.path.join(user_folder, "faiss_index")
+
+    if not os.path.exists(index_path):
+        return jsonify({"error": "Index FAISS non trouvé pour cet utilisateur"}), 404
+
+    embedding = OllamaEmbeddings(model="nomic-embed-text")
+
+    try:
+        store = FAISS.load_local(index_path, embeddings=embedding, allow_dangerous_deserialization=True)
+    except Exception as e:
+        return jsonify({"error": f"Impossible de charger l'index FAISS: {str(e)}"}), 500
+
+    docs = store.similarity_search(question, k=5)
+
+    context = "\n\n".join([doc.page_content for doc in docs])
+    max_context_length = 4000
+    if len(context) > max_context_length:
+        context = context[:max_context_length] + "..."
+
+    prompt = f"""Tu es un assistant IA qui répond uniquement à partir du contexte fourni ci-dessous.
+Contexte:
+{context}
+
+Question:
+{question}
+
+Réponds précisément, en français si la question est en français."""
+   
+    try:
+        response = ollama.chat(
+            model="llama3",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        answer = response.get("choices", [{}])[0].get("message", {}).get("content", "Pas de réponse")
+    except Exception as e:
+        return jsonify({"error": f"Erreur lors de l'appel à Ollama : {str(e)}"}), 500
+
+    sources = []
+    for doc in docs:
+        sources.append({
+            "content": doc.page_content[:500],
+            "metadata": doc.metadata,
+        })
+
+    return jsonify({"answer": answer, "sources": sources})

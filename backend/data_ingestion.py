@@ -14,18 +14,13 @@ Entrez.email = "superfataou13@gmail.com"
 
 UNPAYWALL_EMAIL = "superfataou13@gmail.com"  # Remplace par ton email validé sur Unpaywall
 
-def search_arxiv(query="machine learning", max_results=3, save_dir="./data/arxiv"):
-    os.makedirs(save_dir, exist_ok=True)
+def search_arxiv(query="machine learning", max_results=3):
     search = arxiv.Search(query=query, max_results=max_results)
     results = []
     for result in search.results():
-        paper_path = os.path.join(save_dir, f"{result.get_short_id()}.pdf")
-        if not os.path.exists(paper_path):
-            result.download_pdf(filename=paper_path)
         doc = {
             "title": result.title,
             "url": result.entry_id,
-            "file_path": paper_path,
             "source": "arxiv",
             "summary": result.summary
         }
@@ -33,8 +28,7 @@ def search_arxiv(query="machine learning", max_results=3, save_dir="./data/arxiv
         results.append(doc)
     return results
 
-def search_pubmed(query="machine learning", max_results=3, save_dir="./data/pubmed"):
-    os.makedirs(save_dir, exist_ok=True)
+def search_pubmed(query="machine learning", max_results=3):
     handle = Entrez.esearch(db="pubmed", term=query, retmax=max_results)
     record = Entrez.read(handle)
     ids = record["IdList"]
@@ -45,12 +39,7 @@ def search_pubmed(query="machine learning", max_results=3, save_dir="./data/pubm
         article_data = fetch_handle.read()
         # 💡 Correction ici
         if isinstance(article_data, bytes):
-            article_data = article_data.decode("utf-8", errors="replace")
-
-        file_path = os.path.join(save_dir, f"{id_}.xml")
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(article_data)
-            
+            article_data = article_data.decode("utf-8", errors="replace")           
         root = ET.fromstring(article_data)
         
         
@@ -68,7 +57,6 @@ def search_pubmed(query="machine learning", max_results=3, save_dir="./data/pubm
             title = f"PubMed Article {id_}"
         doc = {
              "title": title,
-            "file_path": file_path,
             "url": f"https://pubmed.ncbi.nlm.nih.gov/{id_}",
             "source": "pubmed",
             "summary": abstract.strip() if abstract else "Résumé non disponible"

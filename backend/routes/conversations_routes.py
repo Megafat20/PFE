@@ -30,7 +30,18 @@ def get_conv(user, cid):
     conv = mongo.db.conversations.find_one({"_id": ObjectId(cid), "user_id": user["_id"]})
     if not conv:
         return jsonify({"error": "Introuvable"}), 404
-    return jsonify({"id": str(conv["_id"]), "title": conv["title"], "messages": conv["messages"]})
+
+    # Optionnel : nettoyer les messages si besoin (par exemple supprimer _id des messages)
+    messages = conv.get("messages", [])
+    for m in messages:
+        if "_id" in m:
+            del m["_id"]
+
+    return jsonify({
+        "id": str(conv["_id"]),
+        "title": conv["title"],
+        "messages": messages
+    })
 
 @bp_conversations.route("/conversations/<cid>", methods=["PUT"])
 @token_required
@@ -53,3 +64,25 @@ def delete_conv(user, cid):
     if res.deleted_count == 0:
         return jsonify({"error": "Introuvable"}), 404
     return jsonify({"msg": "Conversation supprimée"})
+
+
+def get_conversation_history(conversation_id, k=5):
+    
+    try:
+        conv_oid = ObjectId(conversation_id)
+    except Exception:
+        conv_oid = conversation_id 
+    """
+    Récupère les k derniers échanges depuis la conversation Mongo.
+    """
+    convo = mongo.db.conversations.find_one({"_id": conv_oid})
+    if not convo or "messages" not in convo:
+        return []
+
+    all_messages = convo["messages"]
+    # Prendre les k derniers échanges = 2k derniers messages
+    history = all_messages[-(k * 2):]
+    print(f"[DEBUG] Conversation trouvée : {convo}")
+    print(f"[DEBUG] Messages extraits : {history}")
+    return history
+

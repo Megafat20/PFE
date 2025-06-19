@@ -29,6 +29,7 @@ function Sidebar({
             if (response.ok) {
                 const data = await response.json();
                 setHistory(data || []);
+                console.log("Conversations récupérées:", data);
             } else {
                 console.error('Erreur lors de la récupération de l\'historique');
             }

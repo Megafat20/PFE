@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ScrollText, Languages, RefreshCcw } from "lucide-react";
+import { ScrollText, Languages, RefreshCcw, Star } from "lucide-react";
 
 const Sidebar = () => {
   const location = useLocation();
@@ -14,7 +14,6 @@ const Sidebar = () => {
 
   return (
     <aside className="fixed top-20 left-0 w-60 h-[calc(100vh-64px)] bg-white border-r shadow-md flex flex-col p-6 overflow-y-auto z-50">
-
       <nav className="flex flex-col gap-4 flex-grow">
         {links.map(({ to, label, icon }) => {
           const isActive = location.pathname === to;
@@ -33,6 +32,21 @@ const Sidebar = () => {
             </Link>
           );
         })}
+      </nav>
+
+      {/* Bouton Favoris tout en bas, avant le footer */}
+      <nav className="mt-6">
+        <Link
+          to="/favorites"
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors duration-200
+            ${location.pathname === "/favorites"
+              ? "bg-yellow-500 text-white shadow-lg"
+              : "text-yellow-600 hover:bg-yellow-100 hover:text-yellow-700"}
+          `}
+        >
+          <Star className="w-6 h-6" />
+          <span>Favoris</span>
+        </Link>
       </nav>
 
       <footer className="text-sm text-gray-400 mt-auto pt-6 border-t select-none">

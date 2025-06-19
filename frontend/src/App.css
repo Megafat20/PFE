@@ -4,3 +4,44 @@
 @tailwind utilities;
 
 
+@keyframes progress-indeterminate {
+    0% {
+      background-position: 100% 0;
+    }
+    100% {
+      background-position: 0 0;
+    }
+  }
+  
+  .loader {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #3498db;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .dot-flash::after {
+    content: '...';
+    animation: flash 1.2s steps(3, end) infinite;
+  }
+  
+  @keyframes flash {
+    0% { color: transparent; }
+    33% { color: gray; }
+    66% { color: transparent; }
+  }
+  
+
+  .fade-in {
+    animation: fadeIn 0.4s ease forwards;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }

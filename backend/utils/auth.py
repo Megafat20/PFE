@@ -11,6 +11,7 @@ from langchain.schema import Document
 from langchain_ollama import OllamaEmbeddings
 from .jwt_utils import decode_jwt
 
+
 auth_bp = Blueprint('auth', __name__)
 bcrypt = Bcrypt()
 
@@ -56,23 +57,56 @@ def login():
         return jsonify({"token": token})
     return jsonify({"error": "Identifiants invalides"}), 401
 
+
+
 def token_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if request.method == 'OPTIONS':
+        
+        if request.method == "OPTIONS":
+            # simple réponse pour le preflight
             return '', 200
+        print("token_required called")
         auth = request.headers.get('Authorization', None)
+        print("Authorization header:", auth)
         if not auth or not auth.startswith('Bearer '):
+            print("Token manquant")
             return jsonify({'message': 'Token manquant'}), 401
         token = auth.split()[1]
         payload = decode_jwt(token)
+        print("Payload decoded:", payload)
         if not payload or 'user_id' not in payload:
+            print("Token invalide ou expiré")
             return jsonify({'message': 'Token invalide ou expiré'}), 401
         user = mongo.db.users.find_one({'_id': ObjectId(payload['user_id'])})
         if not user:
+            print("Utilisateur introuvable")
             return jsonify({'message': 'Utilisateur introuvable'}), 404
         return f(user, *args, **kwargs)
     return wrapper
+
+@auth_bp.route("/update_profile", methods=["PUT", "OPTIONS"])
+@token_required
+def update_profile(current_user):
+    if request.method == "OPTIONS":
+        # simple réponse pour le preflight
+        return '', 200
+    mongo = current_app.mongo
+    data = request.json
+
+    # Champs que l'utilisateur peut mettre à jour
+    allowed_fields = ["name", "persona", "context"]
+    update_fields = {field: data[field] for field in allowed_fields if field in data}
+
+    if not update_fields:
+        return jsonify({"error": "Aucun champ à mettre à jour"}), 400
+
+    mongo.db.users.update_one(
+        {"_id": current_user["_id"]},
+        {"$set": update_fields}
+    )
+
+    return jsonify({"message": "Profil mis à jour avec succès", "updated_fields": update_fields}), 200
 
 
 def init_auth(app):

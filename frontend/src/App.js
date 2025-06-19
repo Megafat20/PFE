@@ -11,10 +11,17 @@ import MultiFeatureApp from './components/features/MultiFeatureApp';
 import Summary from './components/features/Summary';
 import Translate from './components/features/Translate';
 import Paraphrase from './components/features/Paraphrase';
+import Favorites from './components/features/Favorites';
 
 import LayoutWithSidebar from './components/layouts/LayoutWithSidebar';
 import PlainLayout from './components/layouts/PlainLayout';
 import Search from './components/features/Search';
+import { AuthProvider } from './components/AuthProvider';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
+
+import './i18n/i18n';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -52,7 +59,10 @@ function App() {
   };
 
   return (
+    
     <Router>
+    <AuthProvider>
+    <ToastContainer />
       <Routes>
         {/* Layout sans sidebar */}
         <Route path="/login" element={<PlainLayout user={user} onLogout={handleLogout}><Login onLogin={handleLogin} /></PlainLayout>} />
@@ -61,13 +71,16 @@ function App() {
         <Route path="/" element={<PlainLayout user={user} onLogout={handleLogout}><Home /></PlainLayout>} />
 
         {/* Layout avec sidebar */}
-        <Route path="/search" element={<LayoutWithSidebar  user={user} onLogout={handleLogout}><Search /></LayoutWithSidebar>} />
-        <Route path="/summary" element={<LayoutWithSidebar  user={user} onLogout={handleLogout}><Summary /></LayoutWithSidebar>} />
-        <Route path="/translate" element={<LayoutWithSidebar  user={user} onLogout={handleLogout}><Translate /></LayoutWithSidebar>} />
-        <Route path="/paraphrase" element={<LayoutWithSidebar  user={user} onLogout={handleLogout}><Paraphrase /></LayoutWithSidebar>} />
-        <Route path="/multifeature" element={<LayoutWithSidebar  user={user} onLogout={handleLogout}><MultiFeatureApp /></LayoutWithSidebar>} />
+        <Route path="/search" element={<LayoutWithSidebar user={user} onLogout={handleLogout}><Search /></LayoutWithSidebar>} />
+        <Route path="/summary" element={<LayoutWithSidebar user={user} onLogout={handleLogout}><Summary /></LayoutWithSidebar>} />
+        <Route path="/translate" element={<LayoutWithSidebar user={user} onLogout={handleLogout}><Translate /></LayoutWithSidebar>} />
+        <Route path="/paraphrase" element={<LayoutWithSidebar user={user} onLogout={handleLogout}><Paraphrase /></LayoutWithSidebar>} />
+        <Route path="/favorites" element={<LayoutWithSidebar user={user} onLogout={handleLogout}><Favorites /></LayoutWithSidebar>} />
+        <Route path="/multifeature" element={<LayoutWithSidebar user={user} onLogout={handleLogout}><MultiFeatureApp /></LayoutWithSidebar>} />
+        
       </Routes>
-    </Router>
+    </AuthProvider>
+  </Router>
   );
 }
 
