@@ -1,8 +1,8 @@
 # routes/multi_functions.py
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify ,Response,send_file
 import ollama
 from utils import token_required
-from data_ingestion import search_arxiv,search_openalex,search_pubmed,merge_and_deduplicate
+from data_ingestion import search_arxiv,search_openalex,search_pubmed,merge_and_deduplicate,search_core
 from transformers import pipeline,AutoTokenizer ,MarianMTModel, MarianTokenizer
 from utils.extract_text_from_pdf import extract_pdf_content ,summarize_text,generate_table_of_contents,extract_key_passages,chunk_text
 from extensions import mongo
@@ -11,30 +11,47 @@ from bson import ObjectId
 import textwrap
 import tempfile
 import os
-
+from fpdf import FPDF
 import traceback
+import requests
+
 
 bp_multi = Blueprint("multi_functions", __name__)
 
-def ollama_query(prompt):
-    try:
-        response = ollama.chat(model="llama3", messages=[{"role": "user", "content": prompt}])
-        print("OLLAMA RESPONSE:", response)  # debug
+def ollama_query(prompt, model="llama3", stream=False):
+    url = "http://localhost:11434/api/chat"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": stream,
+    }
 
-        # Vérification robuste du format de la réponse
-        if "text" in response:
-            return response["text"]
-        elif "message" in response and "content" in response["message"]:
-            return response["message"]["content"]
-        else:
-            raise ValueError(f"Réponse inattendue de Ollama : {response}")
-    except Exception as e:
-        # Loguer ou gérer plus proprement selon besoin
-        raise RuntimeError(f"Erreur lors de l'appel à Ollama : {str(e)}")
+    if not stream:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("message", {}).get("content", "") or data.get("text", "")
+
+    # Mode streaming : retourne un générateur de texte
+    def stream_response():
+        with requests.post(url, json=payload, stream=True) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        clean = line.decode("utf-8").replace("data: ", "")
+                        if clean.strip() == "[DONE]":
+                            break
+                        chunk = eval(clean)
+                        yield chunk.get("message", {}).get("content", "")
+                    except Exception as e:
+                        print(f"[Streaming error] {e}")
+
+    return stream_response()
 
 def create_prompt(template: str, **kwargs) -> str:
     return template.format(**kwargs)
-
 
 
 
@@ -73,7 +90,7 @@ def upload_summarize(user):
         highlights = extract_key_passages(text)
 
         mongo.db.summary_documents.insert_one({
-            "user_id": ObjectId(user["id"]),
+            "user_id":user["_id"],
             "filename": file.filename,
             "content": text,
             "summary": summary,
@@ -165,7 +182,7 @@ def summarize_document(doc_id):
             summaries.append(summary)
 
         full_summary = " ".join(summaries)
-
+        
         # Mise à jour du document avec le résumé
         mongo.db.documentsExterne.update_one(
             {"_id": ObjectId(doc_id)},
@@ -213,8 +230,6 @@ def translate_text(user):
         return jsonify({"translation": translation})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-import requests
 
 
 
@@ -279,20 +294,59 @@ def generate_intro(user):
         return jsonify({"error": str(e)}), 500
 
 
-@bp_multi.route('/rapport', methods=['POST'])
+@bp_multi.route("/generate_report", methods=['POST', 'OPTIONS'])
 @token_required
-def rapport(user):
-    data = request.json
-    info = data.get('info', '')
-    if not info:
-        return jsonify({'error': 'Pas d\'information fournie'}), 400
-    prompt = f"Rédige un rapport détaillé à partir des informations suivantes : {info}"
+def generate_report(user):
     try:
-        rapport = ollama_query(prompt)
-        return jsonify({'rapport': rapport})
+        data = request.get_json()
+        objective = data.get("objective", "")
+        content_blocks = data.get("content_blocks", [])
+        language = data.get("language", "fr")
+        style = data.get("style", "scientifique")
+
+        blocks_text = "\n".join(f"- {block}" for block in content_blocks)
+
+        prompt = (
+            f"Tu es un expert en rédaction {style}. Rédige un rapport professionnel en {language} "
+            f"selon l'objectif et les contenus suivants :\n\n"
+            f"Objectif :\n{objective}\n\n"
+            f"Contenus :\n{blocks_text}\n\n"
+            f"Génère un rapport structuré avec des titres et sous-titres adaptés au style {style}."
+        )
+
+        def generate():
+            for chunk in ollama_query(prompt, stream=True):  # 🧠 ton modèle doit supporter `stream=True`
+                yield chunk
+
+        return Response(generate(), mimetype="text/plain")
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@bp_multi.route("/generate_report_pdf", methods=["POST"])
+@token_required
+def generate_report_pdf(user):
+    try:
+        data = request.get_json()
+        content = data.get("content", "")
+        filename = data.get("filename", "rapport")
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_font("Arial", size=12)
+
+        for line in content.split("\n"):
+            pdf.multi_cell(0, 10, line)
+
+        filepath = f"/tmp/{filename}.pdf"
+        pdf.output(filepath)
+
+        return send_file(filepath, as_attachment=True, download_name=f"{filename}.pdf")
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @bp_multi.route('/paraphrase', methods=['POST'])
 @token_required
@@ -324,26 +378,23 @@ def paraphrase(user):
 
 # --- Fonctions supplémentaires ---
 
-@bp_multi.route('/extract_key_info', methods=['POST'])
+@bp_multi.route("/ai_writer", methods=["POST"])
 @token_required
-def extract_key_info(user):
-    data = request.json
-    query = data.get('query', '')
-    if not query:
-        return jsonify({'error': 'Pas de requête fournie'}), 400
+def ai_writer(user):
+    data = request.get_json()
+    prompt = data.get("prompt", "").strip()
+    if not prompt:
+        return jsonify({"error": "Le prompt est requis"}), 400
 
-    prompt = f"""
-    Tu es un assistant IA scientifique. À partir de la requête ci-dessous,
-    extrait les citations, références et informations clés.
-
-    Requête : {query}
-    """
     try:
-        result = ollama_query(prompt)
-        return jsonify({'key_info': result})
+        response = ollama.chat(
+            model="llama3",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        answer = response.message.content if hasattr(response, "message") else "Pas de réponse"
+        return jsonify({"text": answer})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+        return jsonify({"error": f"Erreur lors de l'appel à Ollama : {str(e)}"}), 500
 
 @bp_multi.route('/correct_grammar', methods=['POST'])
 @token_required
@@ -375,13 +426,38 @@ def analyze_trends(user):
         return jsonify({'trend_analysis': analysis})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
+
+THEMATIC_KEYWORDS = {
+    "Biologie": ["biologie", "gène", "cellule", "ADN", "protéine", "organisme", "microbe", "bio"],
+    "Mathématiques": ["math", "algèbre", "probabilité", "statistique", "géométrie", "équation", "matrice", "nombre"],
+    "Informatique": ["IA", "intelligence artificielle", "machine learning", "deep learning", "réseau de neurones", "algorithme", "informatique", "computer"],
+    "Physique": ["physique", "quantique", "relativité", "mécanique", "particule", "énergie", "champ"],
+    "Chimie": ["chimie", "molécule", "réaction", "solvant", "atome", "composé"],
+    # Tu peux enrichir avec d'autres thèmes
+}
+
+def classify_by_theme(doc):
+    content = f"{doc.get('title', '')} {doc.get('summary', '')}".lower()
+    for theme, keywords in THEMATIC_KEYWORDS.items():
+        if any(kw in content for kw in keywords):
+            return theme
+    return "Autres"
+
+def group_documents_by_theme(docs):
+    grouped = {}
+    for doc in docs:
+        theme = classify_by_theme(doc)
+        grouped.setdefault(theme, []).append(doc)
+    return grouped
+
+
 @bp_multi.route('/search', methods=['POST'])
 @token_required
 def handle_document_search(user):
     data = request.get_json()  # ✅ récupération correcte
     print("Received start_document_search:", data)
-
+    language = data.get("language", "en")
     query = data.get("query", "").strip()
     max_results = int(data.get("max_results", 3))
 
@@ -390,22 +466,28 @@ def handle_document_search(user):
 
     try:
         # Recherches
-        arxiv_docs = search_arxiv(query, max_results)
-        pubmed_docs = search_pubmed(query, max_results)
-        openalex_docs = search_openalex(query, max_results)
+        arxiv_docs = search_arxiv(query, max_results, language)
+        pubmed_docs = search_pubmed(query, max_results, language)
+        openalex_docs = search_openalex(query, max_results, language)
+        core_docs = search_core(query, max_results, language)
+        merged_docs = merge_and_deduplicate(arxiv_docs, pubmed_docs, openalex_docs,core_docs)
+        grouped = group_documents_by_theme(merged_docs)
+        grouped_documents = [
+            {"theme": theme, "documents": docs}
+            for theme, docs in grouped.items()
+        ]
 
-        # Fusion et suppression des doublons
-        merged_docs = merge_and_deduplicate(arxiv_docs, pubmed_docs, openalex_docs)
         review_summary = generate_literature_summary(merged_docs, query)
         return jsonify({
-                "documents": merged_docs,
-                "summary": review_summary  # 👈 ajouter la synthèse ici
-            }), 200
+            "grouped_documents": grouped_documents,
+            "summary": review_summary
+        }), 200
 
     except Exception as e:
         print("Erreur lors de la recherche :", str(e))
         return jsonify({"search_error": str(e)}), 500
     
+
 def generate_literature_summary(docs, query):
     from textwrap import shorten
     import requests
@@ -438,6 +520,7 @@ def generate_literature_summary(docs, query):
         print("Erreur LLM:", e)
         return "Synthèse non disponible (erreur lors de l'appel au modèle)."
     
+
 def save_user_search_history(user_id, query):
     mongo.db.search_history.update_one(
         {"user_id": user_id},
@@ -451,13 +534,14 @@ def save_user_search_history(user_id, query):
         },
         upsert=True
     )
-def get_user_search_history(user_id):
-    doc = mongo.db.search_history.find_one({"user_id": user_id})
-    if doc and "history" in doc:
-        return sorted(doc["history"], key=lambda x: x["timestamp"], reverse=True)
-    return []
-@bp_multi.route('/history', methods=['GET'])
+    
+
+@bp_multi.route('/history', methods=['POST'])
 @token_required
-def get_search_history(user):
-    history = get_user_search_history(user["id"])
-    return jsonify({"history": history}), 200
+def save_user_search_history(user):
+    data = request.get_json()
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Requête vide"}), 400
+    history = save_user_search_history(user["_id"], query)
+    return jsonify({"history": history}), 200   

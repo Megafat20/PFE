@@ -5,12 +5,13 @@ import io from "socket.io-client";
 import axios from "axios";
 import "../App.css";
 import MarkdownRenderer from "./MarkdownRenderer";
-
-function App({ user, setUser }) {
+import { useAuth } from './AuthProvider';
+import NotificationConsentModal from "./NotificationConsentModal";
+function App({ }) {
   const [socket, setSocket] = useState(null);
   const [userInput, setUserInput] = useState("");
   const [chat, setChat] = useState([]);
-  
+  const { user, setUser } = useAuth();
   const [currentResponse, setCurrentResponse] = useState("");
   const [files, setFiles] = useState([]);
   const [thumbnails, setThumbnails] = useState([]);
@@ -24,7 +25,6 @@ function App({ user, setUser }) {
   const [selectedConversationId, setSelectedConversationId] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedModel, setSelectedModel] = useState("llama3");
-  const [selectedSource, setSelectedSource] = useState("all");
   const [ragMode, setRagMode] = useState("standard");
   const messagesEndRef = useRef(null);
   const [buffer, setBuffer] = useState("");
@@ -36,6 +36,36 @@ function App({ user, setUser }) {
   const [forceLLM, setForceLLM] = React.useState(false);
   const [persona, setPersona] = useState("default");
   const [context, setContext] = useState("default");
+  const [showNotificationConsentModal, setShowNotificationConsentModal] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [selectedDocument, setSelectedDocument] = useState(null);
+
+  // Action lorsqu'on sélectionne un document
+  const handleDocumentClick = (document) => {
+    console.log("Document sélectionné :", document);
+    setSelectedDocument(document);
+    // Tu peux ici charger les passages du document, ou filtrer les messages par document.
+  };
+
+  // Action pour lancer une recherche dans les messages du chat
+  const handleChatSearch = (query) => {
+    console.log("Recherche dans le chat :", query);
+    // Tu peux faire une requête ici pour chercher dans les messages du backend
+  };
+
+
+
+  useEffect(() => {
+    const justLoggedIn = localStorage.getItem("just_logged_in");
+    console.log("justLoggedIn flag:", justLoggedIn);
+    if (justLoggedIn === "true") {
+      console.log("Ouverture modal de consentement");
+      setShowNotificationConsentModal(true);
+      localStorage.removeItem("just_logged_in");
+    }
+    
+  }, []);
+  
   // --- Vérification token & récupération user ---
   useEffect(() => {
     const verifyToken = async () => {
@@ -80,7 +110,8 @@ function App({ user, setUser }) {
 
 
   
-  
+  const bufferRef = useRef("");
+
   useEffect(() => {
     if (!socket) return;
   
@@ -89,40 +120,40 @@ function App({ user, setUser }) {
       setIsTyping(true);
       setBuffer((prev) => prev + token);
     };
+  
     const onStreamEnd = () => {
-      setIsTyping(false); // ⛔ fin forcée si pas de buffer
+      console.log("Stream terminé, buffer:", bufferRef.current);
+      setBuffer(bufferRef.current);
+      bufferRef.current = "";
+      setIsTyping(false);
     };
-
-    socket.on("connect", () => console.log("✅ Connecté à SocketIO"));
+  
     socket.on("stream_response", onStreamResponse);
-    socket.on("stream_end",onStreamEnd )
+    socket.on("stream_end", onStreamEnd);
+  
     return () => {
-      socket.off("connect");
       socket.off("stream_response", onStreamResponse);
       socket.off("stream_end", onStreamEnd);
     };
   }, [socket]);
-  
+
   useEffect(() => {
-    if (!buffer) return;
+    if (!isTyping || !buffer) return;
   
-    const tokens = buffer.trim().split(" ");
+    const words = buffer.trim().split(/\s+/); // découpe en mots entiers
     let idx = 0;
-  
-    // Construire la phrase au fur et à mesure
     let displayed = "";
   
     const interval = setInterval(() => {
-      if (idx < tokens.length) {
-        displayed += tokens[idx] + " ";
+      if (idx < words.length) {
+        displayed += words[idx] + " ";
   
         setChat(prev => {
           const copy = [...prev];
-          if (copy.length && copy[copy.length - 1].sender === 'botTyping') {
-            // Remplacer complètement le texte à chaque fois (pas de +=)
-            copy[copy.length - 1].text = displayed;
+          if (copy.length && copy[copy.length - 1].sender === "botTyping") {
+            copy[copy.length - 1].text = displayed.trim();
           } else {
-            copy.push({ sender: 'botTyping', text: displayed });
+            copy.push({ sender: "botTyping", text: displayed.trim() });
           }
           return copy;
         });
@@ -130,18 +161,18 @@ function App({ user, setUser }) {
         idx++;
       } else {
         clearInterval(interval);
-        setBuffer("");
         setChat(prev =>
-          prev.map(m => m.sender === 'botTyping' ? { sender: 'bot', text: m.text.trim() } : m)
+          prev.map(m =>
+            m.sender === "botTyping" ? { sender: "bot", text: m.text.trim() } : m
+          )
         );
+        setBuffer("");
         setIsTyping(false);
       }
-    }, 50);
+    }, 40);
   
     return () => clearInterval(interval);
-  }, [buffer]);
-  
-  
+  }, [buffer, isTyping]);
   
 
   // ✉️ Envoi du message utilisateur
@@ -369,14 +400,6 @@ function App({ user, setUser }) {
       });
   };
 
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-
-    setChat((prev) => [...prev, { sender: "user", text: searchQuery }]);
-
-    fetchDocuments(selectedSource, searchQuery);
-  };
 
   const handleClearChat = () => setChat([]);
 
@@ -438,172 +461,166 @@ function App({ user, setUser }) {
 
   // --- JSX ---
   return (
-    <div className="flex h-screen bg-gray-100 pt-16">
-      <div id="progress-bar" />
-
-      {/* Bulle de bienvenue */}
-      {showWelcomeBubble && (
-        <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-blue-50 border border-blue-500 rounded p-5 shadow-lg text-lg font-bold z-50 animate-fadeIn">
-          Bienvenue dans l'assistant IA 👋
-        </div>
+    <>
+      {showNotificationConsentModal && (
+        <NotificationConsentModal onClose={() => setShowNotificationConsentModal(false)} />
       )}
-
-      <button
-        className="md:hidden absolute top-4 left-4 z-50 p-2 bg-blue-600 text-white rounded"
-        onClick={() => setSidebarOpen((prev) => !prev)}
-        aria-label="Toggle sidebar"
-      >
-        {sidebarOpen ? "✕" : "☰"}
-      </button>
-
-      {/* Sidebar */}
-      <Sidebar
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        handleSearchSubmit={handleSearchSubmit}
-        showResultsBubble={showResultsBubble}
-        setShowResultsBubble={setShowResultsBubble}
-        searchResults={searchResults}
-        onSelectConversation={handleSelectConversation}
-        selectedConversationId={selectedConversationId}
-      />
-
-      {/* Chat container */}
-      <div className="flex flex-col flex-grow p-6 bg-white overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-semibold text-gray-800">
-            🧠 Assistant IA
-          </h2>
-          <select
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="border border-gray-300 rounded p-2 text-sm"
-            value={selectedModel}
-          >
-            <option value="llama3">Llama 3</option>
-            <option value="deepseek-coder:6.7b">DeepSeek-coder</option>
-            <option value="mistral:7b-instruct">Mistral</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </div>
-
-        {/* Personnalité et Contexte */}
-        <div className="flex items-center space-x-4 mb-6">
-          <select
-            onChange={handlePersonaChange}
-            className="border border-gray-300 rounded p-2 text-sm"
-            value={persona}
-          >
-            <option value="default">🎭 Personnalité</option>
-            <option value="formelle">Formelle</option>
-            <option value="amicale">Amicale</option>
-            <option value="concise">Concise</option>
-          </select>
-
-          <select
-            onChange={handleContextChange}
-            className="border border-gray-300 rounded p-2 text-sm"
-            value={context}
-          >
-            <option value="default">⚙️ Contexte</option>
-            <option value="scientifique">Scientifique</option>
-            <option value="juridique">Juridique</option>
-            <option value="général">Général</option>
-          </select>
-        </div>
-        <div className="flex space-x-2 mb-4">
-          <button
-            onClick={() => handleTemplateClick("literature_review")}
-            className="px-3 py-1 bg-purple-100 text-purple-800 rounded text-sm hover:bg-purple-200"
-          >
-            Literature Review
-          </button>
-          <button
-            onClick={() => handleTemplateClick("methodology")}
-            className="px-3 py-1 bg-blue-100 text-blue-800 rounded text-sm hover:bg-blue-200"
-          >
-            Methodology
-          </button>
-        </div>
-        {/* Chat box */}
-        <div className="flex flex-col flex-grow overflow-y-auto space-y-4 mb-4">
-          {chat.length === 0 ? (
-            <div className="p-5 text-center italic text-gray-500">
-              Bienvenue sur MyAI, commencez une nouvelle discussion ou relancez
-              les anciennes.
-            </div>
-          ) : (
-            chat.map((msg, i) => {
-              const isUser = (msg.role || msg.sender) === "user";
-              const isTyping = msg.sender === "botTyping";
-              // Fonction pour gérer la notation
-              const handleRate = async (star, index) => {
-                const token = localStorage.getItem("authToken");
-              
-                setRatings((prev) => ({ ...prev, [index]: star }));
-              
-                const payload = {
-                  question: chat[index - 1]?.content || "",
-                  answer: chat[index]?.content || chat[index]?.text,
-                  rating: star,
-                  validated: star >= 4,
-                  conversation_id: selectedConversationId,
-                };
-              
-                // Envoyer au backend si non encore soumis
-                if (!submitteds[index]) {
-                  try {
-                    const res = await fetch("http://localhost:5000/rating/validate_answer", {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${token}`,
-                      },
-                      body: JSON.stringify(payload),
-                    });
-              
-                    if (res.ok) {
-                      setSubmitteds((prev) => ({ ...prev, [index]: true }));
-                    } else {
-                      alert("Erreur lors de la sauvegarde.");
+  
+      <div className="flex h-screen bg-gray-50 pt-16 text-gray-800">
+        <div id="progress-bar" />
+  
+        {showWelcomeBubble && (
+          <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-blue-50 border border-blue-400 rounded-md p-4 shadow text-base font-medium z-50 animate-fadeIn">
+            Bienvenue dans l'assistant IA 👋
+          </div>
+        )}
+  
+        <button
+          className="md:hidden absolute top-4 left-4 z-50 p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+          onClick={() => setSidebarOpen((prev) => !prev)}
+          aria-label="Toggle sidebar"
+        >
+          {sidebarOpen ? "✕" : "☰"}
+        </button>
+  
+        <Sidebar
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          onSelectDocument={handleDocumentClick}
+          chatSearchQuery={chatSearchQuery}
+          setChatSearchQuery={setChatSearchQuery}
+          handleChatSearch={handleChatSearch}
+          onSelectConversation={handleSelectConversation}
+          selectedConversationId={selectedConversationId}
+        />
+  
+        <div className="flex flex-col flex-grow p-6 bg-white overflow-y-auto border-l border-gray-200">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Assistant IA</h2>
+            <select
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="border border-gray-300 rounded-md px-2 py-1 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              value={selectedModel}
+            >
+              <option value="llama3">Llama 3</option>
+              <option value="deepseek-coder:6.7b">DeepSeek-coder</option>
+              <option value="mistral:7b-instruct">Mistral</option>
+              <option value="gemini">Gemini</option>
+            </select>
+          </div>
+  
+          {/* Personnalité et Contexte */}
+          <div className="flex items-center space-x-3 mb-4">
+            <select
+              onChange={handlePersonaChange}
+              className="border border-gray-300 rounded-md px-2 py-1 text-sm bg-white"
+              value={persona}
+            >
+              <option value="default">🎭 Personnalité</option>
+              <option value="formelle">Formelle</option>
+              <option value="amicale">Amicale</option>
+              <option value="concise">Concise</option>
+            </select>
+  
+            <select
+              onChange={handleContextChange}
+              className="border border-gray-300 rounded-md px-2 py-1 text-sm bg-white"
+              value={context}
+            >
+              <option value="default">⚙️ Contexte</option>
+              <option value="scientifique">Scientifique</option>
+              <option value="juridique">Juridique</option>
+              <option value="général">Général</option>
+            </select>
+          </div>
+  
+          {/* Templates */}
+          <div className="flex space-x-2 mb-4">
+            <button
+              onClick={() => handleTemplateClick("literature_review")}
+              className="px-3 py-1 border border-purple-300 text-purple-700 rounded-md text-sm hover:bg-purple-50"
+            >
+              Literature Review
+            </button>
+            <button
+              onClick={() => handleTemplateClick("methodology")}
+              className="px-3 py-1 border border-blue-300 text-blue-700 rounded-md text-sm hover:bg-blue-50"
+            >
+              Methodology
+            </button>
+          </div>
+  
+          {/* Chat messages */}
+          <div className="flex flex-col flex-grow overflow-y-auto space-y-4 mb-4">
+            {chat.length === 0 ? (
+              <div className="p-5 text-center italic text-gray-500">
+                Bienvenue sur MyAI, commencez une nouvelle discussion ou relancez les anciennes.
+              </div>
+            ) : (
+              chat.map((msg, i) => {
+                const isUser = (msg.role || msg.sender) === "user";
+                const isTyping = msg.sender === "botTyping";
+  
+                const handleRate = async (star, index) => {
+                  const token = localStorage.getItem("authToken");
+                  setRatings((prev) => ({ ...prev, [index]: star }));
+                  const payload = {
+                    question: chat[index - 1]?.content || "",
+                    answer: chat[index]?.content || chat[index]?.text,
+                    rating: star,
+                    validated: star >= 4,
+                    conversation_id: selectedConversationId,
+                  };
+  
+                  if (!submitteds[index]) {
+                    try {
+                      const res = await fetch("http://localhost:5000/rating/validate_answer", {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify(payload),
+                      });
+  
+                      if (res.ok) {
+                        setSubmitteds((prev) => ({ ...prev, [index]: true }));
+                      } else {
+                        alert("Erreur lors de la sauvegarde.");
+                      }
+                    } catch {
+                      alert("Erreur réseau.");
                     }
-                  } catch (err) {
-                    alert("Erreur réseau.");
                   }
-                }
-              };
-
-              // Composant notation étoiles inline
-              const StarRating = ({ rating, onRate, disabled }) => (
-                <div className="flex space-x-1 mt-2">
-                  {[1, 2, 3, 4, 5].map((star) => {
-                    const filled = star <= rating;
-                    return (
+                };
+  
+                const StarRating = ({ rating, onRate, disabled }) => (
+                  <div className="flex space-x-1 mt-2">
+                    {[1, 2, 3, 4, 5].map((star) => (
                       <button
                         key={star}
                         type="button"
                         disabled={disabled}
                         onClick={() => !disabled && onRate(star)}
-                        className={`text-2xl ${
-                          filled ? "text-yellow-400" : "text-gray-300"
-                        } hover:text-yellow-500 focus:outline-none`}
-                        aria-label={`${star} étoile${star > 1 ? "s" : ""}`}
+                        className={`text-xl ${
+                          star <= rating ? "text-yellow-400" : "text-gray-300"
+                        } hover:text-yellow-500 transition`}
                       >
                         ★
                       </button>
-                    );
-                  })}
-                </div>
-              );
-
-              return (
-                <div
-                  key={i}
-                  className={`max-w-[70%] p-3 rounded-lg whitespace-pre-wrap ${
-                    isUser ? "self-end bg-blue-100" : "self-start bg-gray-200"
-                  } relative`}
-                >
-                  {isUser ? (
+                    ))}
+                  </div>
+                );
+  
+                return (
+                  <div
+                    key={i}
+                    className={`max-w-[70%] p-3 rounded-md whitespace-pre-wrap border ${
+                      isUser ? "self-end bg-blue-50 border-blue-200" : "self-start bg-gray-100 border-gray-300"
+                    }`}
+                  >
+                   {isUser ? (
                     <p className="whitespace-pre-wrap">
                       {msg.content || msg.text}
                     </p>
@@ -616,129 +633,116 @@ function App({ user, setUser }) {
                       <div className="whitespace-pre-wrap">
                         <MarkdownRenderer content={msg.content || msg.text} />
                       </div>
-                      <StarRating
-                        rating={ratings[i] || 0}
-                        onRate={(star) => handleRate(star, i)}
-                        disabled={submitteds[i] || false}
-                      />
-                      {submitteds[i] && (
-                        <div className="text-green-600 text-sm mt-1 font-semibold">
-                          Merci pour votre avis !
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              );
-              
-            })
-          )}
-
-        <div>
-          {isTyping && (
-  <div className="flex items-center space-x-1 self-start px-4 py-2 bg-gray-200 rounded">
-    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" />
-    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150" />
-    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300" />
-  </div>
-)}
-        </div>
-
-
-          <div ref={messagesEndRef} />
-        </div>
-        <div className="flex items-center mb-2 space-x-2">
-          <input
-            id="forceLLM"
-            type="checkbox"
-            checked={forceLLM}
-            onChange={() => setForceLLM((prev) => !prev)}
-            className="w-4 h-4"
-          />
-          <label htmlFor="forceLLM" className="text-gray-700 select-none">
-            Forcer génération LLM (ignorer documents indexés)
-          </label>
-        </div>
-        {/* Input form */}
-        <form
-          onSubmit={handleSubmit}
-          className="flex items-center space-x-2 mb-4"
-        >
-          <input
-            type="text"
-            value={userInput}
-            onChange={(e) => setUserInput(e.target.value)}
-            placeholder="Posez une question..."
-            className="flex-grow p-2 border border-gray-300 rounded"
-            disabled={isUploading}
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
-            disabled={!userInput.trim() || currentResponse || isUploading}
-          >
-            Envoyer
-          </button>
-          <button
-            type="button"
-            onClick={handleClearChat}
-            className="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
-            disabled={isUploading}
-          >
-            🗑️ Effacer
-          </button>
-        </form>
-
-        {/* Upload form */}
-        <form
-          onSubmit={handleFileUpload}
-          className="flex items-center space-x-2 mb-4"
-          encType="multipart/form-data"
-        >
-          <input
-            type="file"
-            multiple
-            onChange={handleFilesChange}
-            disabled={isUploading}
-            className="p-2 border border-gray-300 rounded"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            disabled={
-              files.length === 0 || !selectedConversationId || isUploading
-            }
-          >
-            {isUploading ? "Chargement..." : "Upload"}
-          </button>
-        </form>
-
-        {/* Uploaded documents */}
-        <h3 className="text-lg font-medium mb-2">Documents Uploadés :</h3>
-        <div className="flex flex-wrap gap-3">
-          {uploadedFiles
-            .filter((file) => file.is_master) // Garde uniquement les masters
-            .map((file, index) => (
-              <div key={index} className="relative inline-block">
-                <img
-                  src={`http://localhost:5000/thumbnails/${
-                    file.user_id.$oid || file.user_id
-                  }/${file.thumbnail}`}
-                  alt={`Thumbnail ${index}`}
-                  className="w-24 h-auto rounded border border-gray-300"
-                />
-                <button
-                  onClick={() => handleDeleteFile(file._id)}
-                  className="absolute top-1 right-1 w-5 h-5 bg-red-600 text-white text-xs rounded-full flex items-center justify-center hover:bg-red-700"
-                >
-                  ×
-                </button>
+                        <StarRating
+                          rating={ratings[i] || 0}
+                          onRate={(star) => handleRate(star, i)}
+                          disabled={submitteds[i] || false}
+                        />
+                        {submitteds[i] && (
+                          <div className="text-green-600 text-sm mt-1">Merci pour votre avis !</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })
+            )}
+  
+            {isTyping && (
+              <div className="flex items-center space-x-1 self-start px-4 py-2 bg-gray-200 rounded">
+                <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" />
+                <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150" />
+                <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300" />
               </div>
-            ))}
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+  
+          {/* Force LLM */}
+          <div className="flex items-center mb-2 space-x-2">
+            <input
+              id="forceLLM"
+              type="checkbox"
+              checked={forceLLM}
+              onChange={() => setForceLLM((prev) => !prev)}
+              className="w-4 h-4"
+            />
+            <label htmlFor="forceLLM" className="text-sm">
+              Forcer génération LLM (ignorer documents indexés)
+            </label>
+          </div>
+  
+          {/* Input form */}
+          <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
+            <input
+              type="text"
+              value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              placeholder="Posez une question..."
+              className="flex-grow p-2 border border-gray-300 rounded-md text-sm"
+              disabled={isUploading}
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 bg-green-800 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+              disabled={!userInput.trim() || currentResponse || isUploading}
+            >
+              Envoyer
+            </button>
+            <button
+              type="button"
+              onClick={handleClearChat}
+              className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+              disabled={isUploading}
+            >
+              Effacer
+            </button>
+          </form>
+  
+          {/* Upload form */}
+          <form onSubmit={handleFileUpload} className="flex items-center space-x-2 mb-4">
+            <input
+              type="file"
+              multiple
+              onChange={handleFilesChange}
+              disabled={isUploading}
+              className="p-2 border border-gray-300 rounded-md text-sm"
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+              disabled={files.length === 0 || !selectedConversationId || isUploading}
+            >
+              {isUploading ? "Chargement..." : "Upload"}
+            </button>
+          </form>
+  
+          {/* Uploaded documents */}
+          <h3 className="text-base font-medium mb-2">Documents Uploadés :</h3>
+          <div className="flex flex-wrap gap-3">
+            {uploadedFiles
+              .filter((file) => file.is_master)
+              .map((file, index) => (
+                <div key={index} className="relative inline-block">
+                  <img
+                    src={`http://localhost:5000/thumbnails/${file.user_id.$oid || file.user_id}/${file.thumbnail}`}
+                    alt={`Thumbnail ${index}`}
+                    className="w-24 h-auto rounded border border-gray-300"
+                  />
+                  <button
+                    onClick={() => handleDeleteFile(file._id)}
+                    className="absolute top-1 right-1 w-5 h-5 bg-red-600 text-white text-xs rounded-full flex items-center justify-center hover:bg-red-700"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
+  
 }
 
 export default App;

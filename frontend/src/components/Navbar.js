@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState,useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Menu, X } from 'lucide-react'; // Icônes modernes
 import './Navbar.css';
+import NotificationsDropdown from "./features/NotificationsDropdown";
 
 function Navbar({ user, onLogout }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,6 +17,32 @@ function Navbar({ user, onLogout }) {
 
   const toggleMenu = () => setIsOpen(!isOpen);
 
+
+  const [notifications, setNotifications] = useState([]);
+
+  useEffect(() => {
+    // Charger les notifications ici depuis ton API
+    const fetchNotifications = async () => {
+      const token = localStorage.getItem("authToken");
+      const res = await fetch("http://localhost:5000/notifications", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data);
+      }
+    };
+    fetchNotifications();
+  }, []);
+
+  const markAsRead = async (id) => {
+    const token = localStorage.getItem("authToken");
+    await fetch(`http://localhost:5000/notifications/${id}/read`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setNotifications((prev) => prev.map(n => n._id === id ? { ...n, read: true } : n));
+  };
   return (
 <nav className="bg-white  shadow-md border-b border-gray-200 fixed top-0 left-0 right-0 z-50">
   <div className="max-w-9xl mx-auto px-6 py-3 flex items-center justify-between">
@@ -43,6 +70,7 @@ function Navbar({ user, onLogout }) {
                 Déconnexion
               </button>
             </li>
+            <NotificationsDropdown notifications={notifications} onMarkAsRead={markAsRead} />
           </>
         ) : (
           <>

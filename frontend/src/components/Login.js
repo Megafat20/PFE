@@ -1,38 +1,41 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom'; // Importer useNavigate pour la redirection
+import { useNavigate } from 'react-router-dom';
 import './AuthStyles.css';
+import { useAuth } from './AuthProvider'; // ✅ utilise le contexte
 
-const Login = ({ onLogin }) => {
+const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false); // Ajout d'un état de chargement
-  const navigate = useNavigate(); // Utiliser useNavigate pour la redirection
+  const [loading, setLoading] = useState(false);
+  const { setUser } = useAuth(); // ✅ récupère setUser du contexte
+  const navigate = useNavigate();
 
-   const handleLogin = async e => {
+  const handleLogin = async (e) => {
     e.preventDefault();
+    setLoading(true);
     try {
       const res = await fetch('http://localhost:5000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
-
       });
       if (!res.ok) throw new Error('Identifiants invalides');
+
       const { token, user } = await res.json();
-      // 1) Stocke le token
+
       localStorage.setItem('authToken', token);
-      // 2) Passe le user en haut pour instancier le socket après
-      onLogin(user);
-      // 3) Redirige vers le chat
+      setUser(user); // ✅ enregistre dans le contexte
+      localStorage.setItem("just_logged_in", "true");
+      await new Promise(resolve => setTimeout(resolve, 100)); 
       navigate('/ChatApp');
     } catch (err) {
-      console.error('Erreur réseau:', err);
-      alert(err.message);
+      console.error('Erreur login :', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
-  
-
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState , useRef, useEffect  } from "react";
 import { Dialog } from "@headlessui/react";
 
 const DocumentInsightModal = ({
@@ -12,7 +12,7 @@ const DocumentInsightModal = ({
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState([]);
-
+  const messagesEndRef = useRef(null);
   const sendQuestion = async () => {
     if (!question.trim()) return;
 
@@ -50,6 +50,14 @@ const DocumentInsightModal = ({
     }
   };
 
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
+
+
+
   return (
     <Dialog open={isOpen} onClose={onClose} className="fixed inset-0 z-50">
       <div className="flex items-center justify-center min-h-screen bg-black bg-opacity-40 p-4">
@@ -83,7 +91,7 @@ const DocumentInsightModal = ({
             <div className="flex flex-col border rounded p-4 bg-white">
               <h3 className="text-lg font-semibold mb-2">💬 Chat avec le document</h3>
 
-              <div className="flex-1 overflow-y-auto mb-2 space-y-2">
+              <div className="flex-1 overflow-y-auto mb-2 space-y-2" style={{ maxHeight: "calc(65vh - 100px)" }} >
                 {messages.length === 0 && (
                   <p className="text-gray-400 italic">Pose ta question...</p>
                 )}

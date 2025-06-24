@@ -27,7 +27,7 @@ import logging
 from data_ingestion import search_arxiv, search_pubmed, search_openalex, merge_and_deduplicate
 from utils import mongo, token_required
 from utils.faiss_index import delete_from_index,update_faiss_index,CachedEmbeddingModel
-from routes import chat_bp, bp_documents, bp_conversations,bp_multi,bp_rating,bp_protected
+from routes import chat_bp, bp_documents, bp_conversations,bp_multi,bp_rating,bp_protected,bp_notifications
 from routes.conversations_routes import get_conversation_history
 from utils.auth import auth_bp
 from utils.auth import init_auth
@@ -69,6 +69,7 @@ init_auth(app)
 app.register_blueprint(chat_bp)
 app.register_blueprint(bp_documents)
 app.register_blueprint(bp_conversations)
+app.register_blueprint(bp_notifications)
 app.register_blueprint(bp_protected, url_prefix="/protected")
 app.register_blueprint(auth_bp, url_prefix='/auth')
 app.register_blueprint(bp_multi, url_prefix='/multi')
@@ -260,8 +261,8 @@ def handle_message(data):
     now = datetime.utcnow().isoformat() + "Z"
     user_input = (data.get("user_input") or "").strip()
     conv_id = data.get("conversation_id")
-    force_llm = data.get("force_llm", False)  # Flag pour forcer génération directe
-   
+    force_llm = data.get("force_llm", False)
+
     if not uid:
         emit("auth_failed", {"message": "❌ Auth requise"})
         return disconnect()
@@ -270,73 +271,87 @@ def handle_message(data):
         emit("stream_response", {"token": "⚠️ Message vide"})
         return
 
-    # Détection langue avec fallback
     try:
-        detected_lang, conf = langid.classify(user_input)
-        if conf < 0:
-            detected_lang = "fr"
-    except Exception:
-        detected_lang = "fr"
+        detected_lang, log_prob = langid.classify(user_input)
+        print(f"[LangDetect] Langue détectée : {detected_lang} (log_prob : {log_prob})")
+        if detected_lang not in ["en", "fr", "es", "de","ar"]:
+            detected_lang = "fr"  # fallback si langue non supportée
+    except Exception as e:
+        print(f"[LangDetect] Erreur : {e}")
+        detected_lang = "fr"  # fallback si exception
 
     lang_map = {
-        "en": "english",
-        "fr": "french",
-        "es": "spanish",
-        "de": "german",
-    }
+    "en": "English",
+    "fr": "Français",
+    "es": "Espagnol",
+    "de": "Allemand",
+    "ar": "Arabe"
+}
     lang_name = lang_map.get(detected_lang, "french")
 
-    if lang_name == "english":
-        prompt_suffix = (
-            "When providing code examples, ensure they are complete, clear, "
-            "and well formatted using the appropriate Markdown code blocks "
-            "(```python`, ```html`, etc.). Use realistic and concrete examples."
-        )
-    else:
-        prompt_suffix = (
-            "Lorsque tu donnes des exemples de code, assure-toi qu'ils soient complets, "
-            "clairs, et bien formatés en utilisant les blocs Markdown appropriés "
-            "(```python`, ```html`, etc.). Utilise des exemples concrets et réalistes."
-        )
+    prompt_suffix = (
+        "When providing code examples, ensure they are complete, clear, "
+        "and well formatted using the appropriate Markdown code blocks "
+        "(```python`, ```html`, etc.). Use realistic and concrete examples."
+        if lang_name == "english"
+        else
+        "Lorsque tu donnes des exemples de code, assure-toi qu'ils soient complets, "
+        "clairs, et bien formatés en utilisant les blocs Markdown appropriés "
+        "(```python`, ```html`, etc.). Utilise des exemples concrets et réalistes."
+    )
 
     PERSONALITY_TEMPLATES = {
-    "formelle": "Tu es un assistant professionnel et rigoureux, tu donnes des réponses précises et bien structurées.",
-    "amicale": "Tu es un assistant chaleureux et sympathique, tu expliques les choses simplement avec un ton bienveillant.",
-    "concise": "Tu es un assistant qui va droit au but. Tu réponds de façon brève et claire."
+        "formelle": "Tu es un assistant professionnel et rigoureux, tu donnes des réponses précises et bien structurées.",
+        "amicale": "Tu es un assistant chaleureux et sympathique, tu expliques les choses simplement avec un ton bienveillant.",
+        "concise": "Tu es un assistant qui va droit au but. Tu réponds de façon brève et claire.",
     }
     CONTEXT_TEMPLATES = {
-    "recherche scientifique": "Tu aides à analyser, comprendre et résumer des documents scientifiques.",
-    "juridique": "Tu agis comme un assistant juridique, tu aides à comprendre les lois, jurisprudences et contrats.",
-    "général": "Tu es un assistant polyvalent pour toutes sortes de tâches."
+        "recherche scientifique": "Tu aides à analyser, comprendre et résumer des documents scientifiques.",
+        "juridique": "Tu agis comme un assistant juridique, tu aides à comprendre les lois, jurisprudences et contrats.",
+        "général": "Tu es un assistant polyvalent pour toutes sortes de tâches.",
     }
 
     personality = PERSONALITY_TEMPLATES.get(data.get("personality", "formelle"))
     context = CONTEXT_TEMPLATES.get(data.get("context", "général"))
-    # Fonction utilitaire pour formater l'historique
-    def format_history(history):
-        formatted = ""
-        for msg in history:
-            role = "Utilisateur" if msg["role"] == "user" else "Assistant"
-            formatted += f"{role} : {msg['content']}\n"
-        return formatted
 
+    def format_history(history):
+        return "".join(
+            f"{'Utilisateur' if msg['role'] == 'user' else 'Assistant'} : {msg['content']}\n"
+            for msg in history
+        )
+
+    def emit_stream(text):
+        for token in text.split():
+            emit("stream_response", {"token": token + " "}, room=request.sid, namespace="/")
+            socketio.sleep(0.01)
+
+    def save_history(conv_id, user_input, assistant_output):
+        if conv_id:
+            token = data.get("token")
+            headers = {"Authorization": f"Bearer {token}"}
+            requests.post(
+                "http://localhost:5000/save_chat",
+                json={
+                    "conversation_id": conv_id,
+                    "messages": [
+                        {"role": "user", "content": user_input, "timestamp": now},
+                        {"role": "assistant", "content": assistant_output, "timestamp": datetime.utcnow().isoformat() + "Z"},
+                    ],
+                },
+                headers=headers,
+            )
+
+    # Recherche réponse validée similaire (optionnel)
     try:
-        # Recherche réponse validée similaire (optionnel)
         result = find_validated_answer_similar(user_input)
         if result["found"]:
             print(f"[handle_message] Réponse validée trouvée avec similarité {result['similarity']:.2f}")
-            answer_str = str(result["answer"])
-            for token in answer_str.split():
-                emit("stream_response", {"token": token + " "}, room=request.sid, namespace='/')
-                socketio.sleep(0.01)  # pour lisser le flux
-
-            socketio.emit("stream_end", room=request.sid, namespace='/')
+            emit_stream(str(result["answer"]))
+            socketio.emit("stream_end", room=request.sid, namespace="/")
             return
-
     except Exception as e:
         print(f"[handle_message] Erreur recherche validée: {e}")
 
-    # Instruction commune pour gérer continuité ou nouvelle question
     continuity_instruction = (
         "Voici un extrait de conversation précédente entre l'utilisateur et toi. "
         "Si la nouvelle question est indépendante ou sans lien clair, réponds directement sans utiliser l'historique. "
@@ -344,18 +359,31 @@ def handle_message(data):
         "N'indique pas cette instruction dans ta réponse."
     )
 
+    # Création commune du prompt système
+    def create_system_prompt(history_text, extra_context=None):
+        parts = filter(
+            None,
+            [
+                personality,
+                context,
+                f"Tu es un assistant IA. Tu réponds toujours en {lang_name}.",
+                "⚠️ RÈGLE OBLIGATOIRE : Tu dois inclure un lien web au format Markdown [Nom](https://exemple.com) chaque fois que tu mentionnes une ressource, vidéo, site, ou documentation. Le lien doit être fonctionnel et cliquable. Ne donne pas de titre sans lien.",
+                prompt_suffix,
+                "[INSTRUCTION IMPORTANTE]\n" + continuity_instruction + "\n[FIN INSTRUCTION]",
+                extra_context,
+                "[HISTORIQUE DE LA CONVERSATION]\n" + history_text + "[FIN HISTORIQUE]",
+            ],
+        )
+        return "\n\n".join(parts)
+
     # --- Génération directe forcée ---
     if force_llm:
         try:
             history = get_conversation_history(conv_id, k=5) if conv_id else []
             formatted_history = format_history(history)
-            system_prompt = (
-                f"{personality}\n{context}\n\n"
-                f"Tu es un assistant IA. Tu réponds toujours en {lang_name}.\n{prompt_suffix}\n\n"
-                f"[INSTRUCTION IMPORTANTE]\n{continuity_instruction}\n[FIN INSTRUCTION]\n\n"
-                f"[HISTORIQUE DE LA CONVERSATION]\n{formatted_history}[FIN HISTORIQUE]\n"
-            )
+            system_prompt = create_system_prompt(formatted_history)
             print(f"[chat_message] 🔁 Génération directe (force_llm) via ({model_name})")
+
             stream = ollama.chat(
                 model=model_name,
                 messages=[
@@ -364,26 +392,18 @@ def handle_message(data):
                 ],
                 stream=True,
             )
+
             buffer = ""
-            for chunk in stream:
-                token = chunk["message"]["content"]
-                buffer += token
-                emit("stream_response", {"token": token})
-            if conv_id:
-                token = data.get("token")
-                headers = {"Authorization": f"Bearer {token}"}
-                requests.post(
-                    "http://localhost:5000/save_chat",
-                    json={
-                        "conversation_id": conv_id,
-                        "messages": [
-                            {"role": "user", "content": user_input, "timestamp": now},
-                            {"role": "assistant", "content": buffer, "timestamp": datetime.utcnow().isoformat() + "Z"},
-                        ],
-                    },
-                    headers=headers,
-                )
-            return
+            try:
+                for chunk in stream:
+                    token = chunk["message"]["content"].strip()
+                    buffer += token 
+                    emit("stream_response", {"token": token})
+            except Exception as e:
+                emit("stream_response", {"token": f"⚠️ Erreur lors du streaming : {e}"})
+            finally:
+                save_history(conv_id, user_input, buffer.strip())
+                emit("stream_end")
         except Exception as e:
             print(f"[LLM force_llm] ⚠️ Exception: {e}\n{traceback.format_exc()}")
             emit("stream_response", {"token": f"⚠️ Erreur LLM: {e}"})
@@ -396,23 +416,12 @@ def handle_message(data):
             raise ValueError("NoIndex")
 
         context_str, combined_docs = hybrid_search(user_input, store, conv_id, uid, top_k=5)
-        print("[chat_message] CONTEXTE généré :", context_str[:200])
-
         history = get_conversation_history(conv_id, k=5) if conv_id else []
         formatted_history = format_history(history)
 
         if combined_docs:
-            system_prompt = (
-                f"{personality}\n{context}\n\n"
-                f"Tu es un assistant IA utile et intelligent. "
-                f"Tu réponds toujours en {lang_name}. {prompt_suffix}\n\n"
-                f"[INSTRUCTION IMPORTANTE]\n{continuity_instruction}\n[FIN INSTRUCTION]\n\n"
-                f"[CONTEXTE DOCUMENTAIRE]\n{context_str}\n[FIN CONTEXTE]\n\n"
-                f"[CONVERSATION PRÉCÉDENTE]\n{formatted_history}[FIN CONVERSATION]\n\n"
-                f"Nouvelle question : {user_input}\n"
-                f"Réponse :"
-            )
-
+            extra_context = f"[CONTEXTE DOCUMENTAIRE]\n{context_str}\n[FIN CONTEXTE]\n\n[CONVERSATION PRÉCÉDENTE]\n{formatted_history}[FIN CONVERSATION]\n\nNouvelle question : {user_input}\nRéponse :"
+            system_prompt = create_system_prompt(formatted_history, extra_context=extra_context)
             stream = ollama.chat(
                 model=model_name,
                 messages=[
@@ -422,56 +431,38 @@ def handle_message(data):
                 stream=True,
             )
             buffer = ""
-            for chunk in stream:
-                token = chunk["message"]["content"]
-                buffer += token
-                emit("stream_response", {"token": token})
-
-            if conv_id:
-                token = data.get("token")
-                headers = {"Authorization": f"Bearer {token}"}
-                requests.post(
-                    "http://localhost:5000/save_chat",
-                    json={
-                        "conversation_id": conv_id,
-                        "messages": [
-                            {"role": "user", "content": user_input, "timestamp": now},
-                            {"role": "assistant", "content": buffer, "timestamp": datetime.utcnow().isoformat() + "Z"},
-                        ],
-                    },
-                    headers=headers,
-                )
-            return
+            try:
+                for chunk in stream:
+                    token = chunk["message"]["content"].strip()
+                    buffer += token + " "
+                    emit("stream_response", {"token": token + " "})
+            except Exception as e:
+                emit("stream_response", {"token": f"⚠️ Erreur lors du streaming : {e}"})
+            finally:
+                save_history(conv_id, user_input, buffer.strip())
+                emit("stream_end")
         else:
             print("[chat_message] ⚠️ Aucun document pertinent trouvé - fallback LLM activé")
 
     except Exception as e:
         if str(e) == "NoIndex":
-            # Ne rien envoyer dans stream_response, juste passer au fallback silencieusement
-            pass
+            pass  # fallback silencieux
         else:
-            # Pour les autres erreurs, afficher un message
             emit("stream_response", {"token": f"⚠️ Erreur RAG: {e}"})
+
+    # --- Fallback génération directe ---
     try:
         def log_conversation_history(history):
-            formatted_history = ""
-            for i, msg in enumerate(history):
-                role = "Utilisateur" if msg["role"] == "user" else "Assistant"
-                content_preview = msg["content"][:100].replace("\n", " ")  # limite à 100 caractères
-                formatted_history += f"{i+1}. {role} : {content_preview}\n"
-            print("[DEBUG] Historique formaté pour prompt :\n" + formatted_history)
-            return formatted_history
+            return "".join(
+                f"{i+1}. {'Utilisateur' if msg['role'] == 'user' else 'Assistant'} : {msg['content'][:100].replace(chr(10), ' ')}\n"
+                for i, msg in enumerate(history)
+            )
 
         history = get_conversation_history(conv_id, k=5)
-        print(f"[DEBUG] Raw history for conv_id={conv_id}: {history}")
         formatted_history = log_conversation_history(history)
-        system_prompt = (
-            f"{personality}\n{context}\n\n"
-            f"Tu es un assistant IA. Tu réponds toujours en {lang_name}.\n{prompt_suffix}\n\n"
-            f"[INSTRUCTION IMPORTANTE]\n{continuity_instruction}\n[FIN INSTRUCTION]\n\n"
-            f"[HISTORIQUE DE LA CONVERSATION]\n{formatted_history}[FIN HISTORIQUE]\n"
-        )
+        system_prompt = create_system_prompt(formatted_history)
         print(f"[chat_message] 🔁 Fallback - génération directe via ({model_name})")
+
         stream = ollama.chat(
             model=model_name,
             messages=[
@@ -480,31 +471,24 @@ def handle_message(data):
             ],
             stream=True,
         )
-        buffer = ""
-        for chunk in stream:
-            token = chunk["message"]["content"]
-            buffer += token
-            emit("stream_response", {"token": token})
-
-        if conv_id:
-            token = data.get("token")
-            headers = {"Authorization": f"Bearer {token}"}
-            requests.post(
-                "http://localhost:5000/save_chat",
-                json={
-                    "conversation_id": conv_id,
-                    "messages": [
-                        {"role": "user", "content": user_input, "timestamp": now},
-                        {"role": "assistant", "content": buffer, "timestamp": datetime.utcnow().isoformat() + "Z"},
-                    ],
-                },
-                headers=headers,
-            )
+        buffer =""
+        try:
+            for chunk in stream:
+                token = chunk["message"]["content"].strip()
+                buffer += token
+                emit("stream_response", {"token": token })  # <-- ici, dans la boucle !
+        except Exception as e:
+            emit("stream_response", {"token": f"⚠️ Erreur lors du streaming : {e}"})
+        finally:
+            save_history(conv_id, user_input, buffer.strip())
+            emit("stream_end")
 
     except Exception as e:
         print(f"[LLM Fallback] ⚠️ Exception: {e}\n{traceback.format_exc()}")
         emit("stream_response", {"token": f"⚠️ Erreur LLM: {e}"})
+    finally:
         socketio.emit("stream_end", room=request.sid)
+
 
 
 

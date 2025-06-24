@@ -22,7 +22,43 @@ def create_conv(user):
 @token_required
 def list_conv(user):
     convs = mongo.db.conversations.find({"user_id": user["_id"]})
-    return jsonify([{"id": str(c["_id"]), "title": c["title"], "created_at": c["created_at"]} for c in convs])
+    result = []
+    for c in convs:
+        created_at = c.get("created_at")
+        created_at_str = created_at.isoformat() if created_at else None
+        result.append({
+            "id": str(c["_id"]),
+            "title": c["title"],
+            "created_at": created_at_str
+        })
+    return jsonify(result)
+
+
+
+@bp_conversations.route("/conversations/search", methods=["GET"])
+@token_required
+def search_conversation_messages(user):
+    query = request.args.get("q", "").strip().lower()
+    if not query:
+        return jsonify({"error": "Paramètre de recherche manquant"}), 400
+
+    results = []
+    conversations = mongo.db.conversations.find({"user_id": user["_id"]})
+    
+    for conv in conversations:
+        conv_id = str(conv["_id"])
+        title = conv["title"]
+        for msg in conv.get("messages", []):
+            if query in msg.get("content", "").lower():
+                results.append({
+                    "conversation_id": conv_id,
+                    "conversation_title": title,
+                    "role": msg.get("role", ""),
+                    "content": msg.get("content", ""),
+                    "timestamp": msg.get("timestamp")
+                })
+
+    return jsonify(results)
 
 @bp_conversations.route("/conversations/<cid>", methods=["GET"])
 @token_required
@@ -82,7 +118,5 @@ def get_conversation_history(conversation_id, k=5):
     all_messages = convo["messages"]
     # Prendre les k derniers échanges = 2k derniers messages
     history = all_messages[-(k * 2):]
-    print(f"[DEBUG] Conversation trouvée : {convo}")
-    print(f"[DEBUG] Messages extraits : {history}")
     return history
 

@@ -3,7 +3,7 @@ import re
 import hashlib
 import difflib
 from datetime import datetime
-from flask import Blueprint, request, jsonify, send_from_directory,current_app
+from flask import Blueprint, request, jsonify, send_from_directory,current_app,Response
 from werkzeug.utils import secure_filename
 from bson import ObjectId
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -26,13 +26,15 @@ from utils.paths import get_user_folder, get_user_index_folder
 from PIL import Image
 from utils.extract_text_from_pdf import extract_pdf_content
 import nltk
-
+import docx2txt
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 import pytesseract
 from pdf2image import convert_from_path
 from bs4 import BeautifulSoup
 from .multi_functions_routes import ollama_query
+from deep_translator import GoogleTranslator
+
 
 bp_documents = Blueprint("documents", __name__)
 BASE_DIR = os.path.dirname(__file__)
@@ -47,6 +49,13 @@ ALLOWED_EXTENSIONS = {
 EXTERNAL_UPLOAD_FOLDER = "./external_uploads"
 
 
+
+def translate_text(text, target_lang):
+    try:
+        return GoogleTranslator(source='auto', target=target_lang).translate(text)
+    except Exception:
+        return text
+    
 def find_best_fuzzy_match(haystack, needle, min_ratio=0.6):
     needle_len = len(needle)
     best_start = -1
@@ -109,6 +118,15 @@ def create_thumbnail(filepath, save_path, size=(200, 200)):
             img = Image.open(filepath)
             img.thumbnail(size)
             img.save(save_path)
+        elif ext in [".docx"]:
+            # Pour DOCX, générer une thumbnail textuelle
+            text = docx2txt.process(filepath)
+            if text:
+                img = Image.new("RGB", (400, 300), color=(240, 240, 240))
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(img)
+                draw.text((10, 10), text[:300] + "...", fill=(0, 0, 0))
+                img.save(save_path, "PNG")
         else:
             # Pas de thumbnail pour autres fichiers
             pass
@@ -174,45 +192,55 @@ def extract_text_with_ocr(filepath):
         return ""
 
 def extract_office_document(filepath):
-    """Extraction for Word documents"""
+    """Extraction robuste pour documents Word"""
+    import subprocess
+    from docx import Document
+
+    ext = os.path.splitext(filepath)[1].lower()
+    text = ""
+
     try:
-        from io import BytesIO
-        from zipfile import ZipFile
-        import xml.etree.ElementTree as ET
-        
-        text = ""
-        ext = os.path.splitext(filepath)[1].lower()
-        
-        if ext in ['.docx', '.pptx']:
-            with ZipFile(filepath) as docx:
-                if ext == '.docx':
-                    document = docx.read('word/document.xml')
-                elif ext == '.pptx':
-                    document = docx.read('ppt/slides/slide1.xml')
-                
-                root = ET.fromstring(document)
-                for elem in root.iter():
-                    if elem.text and elem.text.strip():
-                        text += elem.text.strip() + "\n"
-        
-        elif ext in ['.doc', '.rtf']:
+        if ext == ".docx":
+            # ✅ Extraction avec python-docx
+            doc = Document(filepath)
+            text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+            print(f"[DOCX] Texte extrait depuis {filepath} : {len(text)} caractères")
+
+        elif ext == ".doc":
+            # ✅ Extraction avec antiword
             try:
                 result = subprocess.run(
-                    ['antiword', filepath], 
-                    capture_output=True, 
+                    ["antiword", filepath],
+                    capture_output=True,
                     text=True,
-                    timeout=30  # Timeout for large files
+                    timeout=30
                 )
                 text = result.stdout
+                print(f"[DOC] Texte extrait via antiword ({len(text)} caractères)")
             except Exception as e:
-                print(f"Erreur antiword: {e}")
-                text = extract_text_with_ocr(filepath)
-        
-        return clean_text(text)
-    except Exception as e:
-        print(f"Erreur extraction Office: {e}")
-        return extract_text_with_ocr(filepath)
+                print(f"[DOC] Erreur antiword : {e}")
+                text = ""
 
+        elif ext == ".rtf":
+            # Optionnel : support RTF
+            try:
+                import striprtf
+                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                    rtf_text = f.read()
+                    text = striprtf.rtf_to_text(rtf_text)
+            except Exception as e:
+                print(f"[RTF] Erreur striprtf : {e}")
+                text = ""
+
+        if not text.strip():
+            print(f"[⚠️] Aucun texte extrait → fallback OCR")
+            return extract_text_with_ocr(filepath)
+
+        return clean_text(text)
+
+    except Exception as e:
+        print(f"[Office] ⚠️ Erreur extraction Office : {e}")
+        return extract_text_with_ocr(filepath)
 def extract_spreadsheet(filepath):
     """Extraction for spreadsheets"""
     try:
@@ -306,40 +334,50 @@ def extract_structured_content(filepath, format_type):
         print(f"Erreur extraction structurée: {e}")
     
     return content
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import os
 
 def extract_file_content(filepath):
-    """Generic extraction function for all formats"""
+    """Extraction générique du contenu d'un fichier, avec fallback OCR si besoin"""
     ext = os.path.splitext(filepath)[1].lower().replace('.', '')
-    
-    if ext == 'pdf':
-        content = extract_text_from_pdf(filepath)
-        if not content.strip() or len(content) < 100:
+    content = ""
+
+    try:
+        if ext == 'pdf':
+            content = extract_text_from_pdf(filepath)
+            if not content.strip() or len(content) < 100:
+                print("[INFO] Faible contenu PDF – passage en OCR")
+                content = extract_text_with_ocr(filepath)
+
+        elif ext in ['png', 'jpg', 'jpeg', 'tiff']:
             content = extract_text_with_ocr(filepath)
-    
-    elif ext in ['png', 'jpg', 'jpeg', 'tiff']:
+
+        elif ext in ['doc', 'docx', 'rtf']:
+            content = extract_office_document(filepath)
+
+        elif ext in ['xls', 'xlsx', 'csv']:
+            content = extract_spreadsheet(filepath)
+
+        elif ext in ['xml', 'json', 'html', 'md']:
+            content = extract_structured_content(filepath, ext)
+
+        else:  # txt ou inconnu
+            try:
+                with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except Exception as e:
+                print(f"[ERREUR] Lecture fichier brut : {e}")
+                content = extract_text_with_ocr(filepath)
+
+    except Exception as e:
+        print(f"[ERREUR] Extraction échouée ({ext}) : {e}")
         content = extract_text_with_ocr(filepath)
-    
-    elif ext in ['doc', 'docx', 'rtf']:
-        content = extract_office_document(filepath)
-    
-    elif ext in ['xls', 'xlsx', 'csv']:
-        content = extract_spreadsheet(filepath)
-    
-    # elif ext in ['ppt', 'pptx']:
-    #     content = extract_presentation(filepath)
-    
-    elif ext in ['xml', 'json', 'html', 'md']:
-        content = extract_structured_content(filepath, ext)
-    
-    else:  # txt and others
-        try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-        except Exception as e:
-            print(f"Erreur lecture fichier: {e}")
-            content = ""
-    
-    # Split text into chunks
+
+    if not content.strip():
+        print("[⚠️] Aucun contenu extrait après fallback.")
+        return []
+
+    # ✅ Nettoyage et découpage
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
@@ -347,8 +385,9 @@ def extract_file_content(filepath):
         add_start_index=True,
     )
     chunks = text_splitter.split_text(clean_text(content))
-    return chunks
+    print(f"[✅] {len(chunks)} chunks générés à partir du fichier : {os.path.basename(filepath)}")
 
+    return chunks
 
 
 @bp_documents.route("/upload", methods=["POST"])
@@ -529,23 +568,24 @@ def get_document_chunks(user):
     try:
         data = request.get_json()
         document_id = data.get("document_id")
+        language = data.get("language", "en")  # Récupère la langue, défaut 'en'
+
         if not document_id:
             return jsonify({"error": "document_id requis"}), 400
 
-        # Conversion spécifique pour URL arXiv abs -> pdf
+        # Conversion URL arXiv
         if "arxiv.org/abs/" in document_id:
             document_id = document_id.replace("arxiv.org/abs/", "arxiv.org/pdf/") + ".pdf"
 
         # Recherche en MongoDB
         doc = mongo.db.documents_externes.find_one({"_id": document_id})
 
-        # Téléchargement + extraction si document absent
+        # Téléchargement + extraction si absent
         if not doc:
             filepath = os.path.join(EXTERNAL_UPLOAD_FOLDER, str(user["_id"]), os.path.basename(document_id))
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
             if not os.path.exists(filepath):
-                # Téléchargement PDF distant
                 response = requests.get(document_id, stream=True, timeout=15)
                 response.raise_for_status()
 
@@ -557,7 +597,6 @@ def get_document_chunks(user):
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
 
-            # Extraction texte PDF
             content_data = extract_pdf_content(filepath)
             text_content = content_data["text_sections"][:100_000]
 
@@ -575,7 +614,15 @@ def get_document_chunks(user):
             }
             mongo.db.documents_externes.insert_one(doc)
 
-        # Indexation FAISS si nécessaire
+        # Traduction du contenu si nécessaire
+        content_to_use = doc.get("content", "")
+        if language != "en":
+            try:
+                content_to_use = translate_text(content_to_use, language)
+            except Exception as e:
+                print(f"[⚠️ Traduction contenu échouée] : {e}")
+
+        # Indexation FAISS (sans traduction, on indexe le texte original)
         if not doc.get("indexed", False):
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=50)
             chunks = text_splitter.split_text(doc["content"])[:200]
@@ -604,15 +651,27 @@ def get_document_chunks(user):
                 {"$set": {"indexed": True}}
             )
 
+        # Si on a déjà highlight_chunks en base, renvoyer
         if "highlight_chunks" in doc:
             full_text = " ".join(doc.get("content", "").splitlines())[:20000]
-            # Renvoie directement les objets complets
             valid_chunks = [chunk for chunk in doc["highlight_chunks"] if chunk.get("text") in full_text]
+
+            # Traduction des extraits avant renvoi
+            if language != "en":
+                for chunk in valid_chunks:
+                    try:
+                        chunk["text"] = translate_text(chunk["text"], language)
+                        if chunk.get("label"):
+                            chunk["label"] = translate_text(chunk["label"], language).upper()
+                    except Exception as e:
+                        print(f"[⚠️ Traduction highlight_chunks échouée] : {e}")
 
             return jsonify({
                 "chunks": valid_chunks,
-                "full_text": full_text
+                "full_text": content_to_use[:20000]  # texte potentiellement traduit
             })
+
+        # Construction prompt avec contenu traduit (ou original si en='en')
         prompt = f"""
         Tu es un expert en lecture de documents scientifiques. Voici le contenu partiel d’un document.
         Identifie les passages les plus pertinents concernant l’objectif, les méthodes, les résultats et la conclusion.
@@ -629,7 +688,7 @@ def get_document_chunks(user):
         ...
 
         Document :
-        {doc.get('content', '')[:5000]}
+        {content_to_use[:5000]}
         """
 
         response = ollama_query(prompt)
@@ -638,8 +697,6 @@ def get_document_chunks(user):
             raw_chunks = raw_chunks[1:]
 
         full_text = " ".join(doc.get("content", "").splitlines())[:20000]
-
-        print(f"Full text length: {len(full_text)}")
 
         chunks = [chunk.replace('\n', ' ').strip() for chunk in raw_chunks]
 
@@ -657,22 +714,29 @@ def get_document_chunks(user):
                     "end": end,
                     "label": label
                 })
-
             else:
                 print("No match found.")
 
-        print(f"Chunks with positions: {valid_chunks_with_pos}")
+        # Traduction des extraits trouvés avant sauvegarde et envoi
+        if language != "en":
+            for chunk in valid_chunks_with_pos:
+                try:
+                    chunk["text"] = translate_text(chunk["text"], language)
+                    if chunk.get("label"):
+                        chunk["label"] = translate_text(chunk["label"], language).upper()
+                except Exception as e:
+                    print(f"[⚠️ Traduction des extraits échouée] : {e}")
 
         mongo.db.documents_externes.update_one(
             {"_id": document_id},
             {"$set": {"highlight_chunks": valid_chunks_with_pos}}
         )
 
-
         return jsonify({
             "chunks": valid_chunks_with_pos,
-            "full_text": full_text
+            "full_text": content_to_use[:20000]
         })
+
     except Exception as e:
         print(f"[Erreur] Exception dans /document_chunks : {e}")
         return jsonify({"error": str(e)}), 500
@@ -705,9 +769,10 @@ def add_favorite(user):
     # Ajout aux favoris de l'utilisateur
     user_id = user["_id"]
 
-    mongo.db.users.update_one(
+    mongo.db.users_profile.update_one(
         {"_id": user_id},
-        {"$addToSet": {"favorites": document_id}}
+        {"$addToSet": {"favorites": document_id}},
+        upsert=True
     )
 
     return jsonify({'message': 'Document ajouté aux favoris'})
@@ -730,7 +795,7 @@ def get_favorites(user):
     user_id = user["_id"]
 
     # Récupérer la liste des _id favoris de l'utilisateur
-    user_data = mongo.db.users.find_one({"_id": user_id}, {"favorites": 1})
+    user_data = mongo.db.users_profile.find_one({"_id": user_id}, {"favorites": 1})
     favorites_ids = user_data.get("favorites", [])
 
     # Chercher les documents dans documents_externes
@@ -760,6 +825,26 @@ def get_user_documents(user, conversation_id):
         if isinstance(doc["user_id"], ObjectId):
             doc["user_id"] = str(doc["user_id"])
     return jsonify({"files": docs})
+
+@bp_documents.route("/documents", methods=["GET"])
+@token_required
+def get_user_all_documents(user):
+    docs = list(mongo.db.documents.find({"user_id": user["_id"]}))
+    
+    formatted = []
+    for doc in docs:
+        upload_date = doc.get("upload_date")
+        # Convertir en ISO string si upload_date existe
+        upload_date_str = upload_date.isoformat() if upload_date else None
+        
+        formatted.append({
+            "id": str(doc["_id"]),
+            "title": doc.get("title", ""),
+            "filename": doc.get("filename", ""),
+            "uploaded_at": upload_date_str
+        })
+
+    return jsonify(formatted)
 
 
 @bp_documents.route("/delete_document/<doc_id>", methods=["DELETE"])
@@ -867,3 +952,17 @@ def fetch_documents(user):
 
     documents = sorted(documents, key=lambda d: d.get('title', '').lower())
     return jsonify({'documents': documents})
+
+
+@bp_documents.route("/proxy_pdf")
+def proxy_pdf():
+    url = request.args.get("url")
+    if not url:
+        return "Missing url parameter", 400
+    try:
+        r = requests.get(url, timeout=15)
+        if r.status_code != 200 or "pdf" not in r.headers.get("Content-Type", ""):
+            return "Not a valid PDF file", 400
+        return Response(r.content, mimetype="application/pdf")
+    except Exception as e:
+        return str(e), 500

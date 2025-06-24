@@ -74,13 +74,13 @@ def chat_document(user):
     except Exception as e:
         return jsonify({"error": f"Impossible de charger l'index FAISS: {str(e)}"}), 500
 
-    docs = store.similarity_search(question, k=5)
+    docs = store.similarity_search(question, k=2)
 
     context = "\n\n".join([doc.page_content for doc in docs])
-    max_context_length = 4000
+    max_context_length = 2000
     if len(context) > max_context_length:
         context = context[:max_context_length] + "..."
-
+    print("🧠 Context:", context)
     prompt = f"""Tu es un assistant IA qui répond uniquement à partir du contexte fourni ci-dessous.
 Contexte:
 {context}
@@ -95,7 +95,8 @@ Réponds précisément, en français si la question est en français."""
             model="llama3",
             messages=[{"role": "user", "content": prompt}]
         )
-        answer = response.get("choices", [{}])[0].get("message", {}).get("content", "Pas de réponse")
+        print("🧠 Réponse brute Ollama:", response)
+        answer = response.message.content if hasattr(response, "message") else "Pas de réponse"
     except Exception as e:
         return jsonify({"error": f"Erreur lors de l'appel à Ollama : {str(e)}"}), 500
 

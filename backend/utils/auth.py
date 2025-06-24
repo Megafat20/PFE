@@ -101,7 +101,7 @@ def update_profile(current_user):
     if not update_fields:
         return jsonify({"error": "Aucun champ à mettre à jour"}), 400
 
-    mongo.db.users.update_one(
+    mongo.db.users_profile.update_one(
         {"_id": current_user["_id"]},
         {"$set": update_fields}
     )

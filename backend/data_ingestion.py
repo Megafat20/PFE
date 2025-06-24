@@ -7,28 +7,45 @@ from flask_socketio import SocketIO
 from Bio import Entrez
 import time
 import xml.etree.ElementTree as ET
+from deep_translator import GoogleTranslator
 
+def translate_text(text, target_lang):
+    try:
+        return GoogleTranslator(source='auto', target=target_lang).translate(text)
+    except Exception:
+        return text
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")  # Autoriser CORS si frontend sur un autre port
 Entrez.email = "superfataou13@gmail.com"
 
 UNPAYWALL_EMAIL = "superfataou13@gmail.com"  # Remplace par ton email validé sur Unpaywall
 
-def search_arxiv(query="machine learning", max_results=3):
+def search_arxiv(query="machine learning", max_results=3 , language="en"):
     search = arxiv.Search(query=query, max_results=max_results)
     results = []
     for result in search.results():
+        title = result.title
+        summary = result.summary
+        if language != "en":
+            title = translate_text(title, language)
+            summary = translate_text(summary, language)
         doc = {
-            "title": result.title,
+            "title": title,
             "url": result.entry_id,
             "source": "arxiv",
-            "summary": result.summary
+            "summary": summary
         }
         socketio.emit('document', doc)
         results.append(doc)
     return results
 
-def search_pubmed(query="machine learning", max_results=3):
+def search_pubmed(query="machine learning", max_results=3, language="en"):
+    try:
+        if language != "en":
+            query = translate_text(query, "en")
+    except Exception as e:
+        print(f"[⚠️ Traduction échouée] Query non traduite : {e}")
+
     handle = Entrez.esearch(db="pubmed", term=query, retmax=max_results)
     record = Entrez.read(handle)
     ids = record["IdList"]
@@ -37,26 +54,33 @@ def search_pubmed(query="machine learning", max_results=3):
     for id_ in ids:
         fetch_handle = Entrez.efetch(db="pubmed", id=id_, rettype="xml", retmode="text")
         article_data = fetch_handle.read()
-        # 💡 Correction ici
+
         if isinstance(article_data, bytes):
-            article_data = article_data.decode("utf-8", errors="replace")           
+            article_data = article_data.decode("utf-8", errors="replace")
         root = ET.fromstring(article_data)
-        
-        
+
+        # Résumé
         abstract = ""
         for abstract_text in root.findall(".//AbstractText"):
             if abstract_text.text:
                 abstract += abstract_text.text.strip() + " "
-                
-                  # 🏷️ Titre
+
+        # Titre
         title = ""
         title_elem = root.find(".//ArticleTitle")
         if title_elem is not None and title_elem.text:
             title = title_elem.text.strip()
         else:
             title = f"PubMed Article {id_}"
+
+        # Traduction si besoin
+        if language != "en":
+            title = translate_text(title, language)
+            if abstract:
+                abstract = translate_text(abstract, language)
+
         doc = {
-             "title": title,
+            "title": title,
             "url": f"https://pubmed.ncbi.nlm.nih.gov/{id_}",
             "source": "pubmed",
             "summary": abstract.strip() if abstract else "Résumé non disponible"
@@ -66,49 +90,6 @@ def search_pubmed(query="machine learning", max_results=3):
         results.append(doc)
 
     return results
-
-# Fonction Semantic Scholar (commentée - à activer si besoin)
-# def search_semantic_scholar(query="machine learning", max_results=2):
-#     url = "https://api.semanticscholar.org/graph/v1/paper/search"
-#     params = {
-#         "query": query,
-#         "limit": max_results,
-#         "fields": "title,url,abstract,openAccessPdf"
-#     }
-#     results = []
-#     retries = 3
-#     backoff = 5  # secondes à attendre en cas de 429
-# 
-#     for attempt in range(retries):
-#         try:
-#             response = requests.get(url, params=params)
-#             if response.status_code == 429:
-#                 print(f"Rate limit hit, waiting {backoff}s before retry ({attempt+1}/{retries})")
-#                 time.sleep(backoff)
-#                 continue  # réessayer
-#             response.raise_for_status()  # lance une exception pour autre erreur HTTP
-#             data = response.json()
-#             papers = data.get("data", [])
-#             for paper in papers:
-#                 open_access_pdf = paper.get("openAccessPdf")
-#                 pdf_url = open_access_pdf.get("url") if open_access_pdf else None
-#                 if pdf_url:
-#                     doc = {
-#                         "title": paper.get("title", "No title"),
-#                         "url": paper.get("url", ""),
-#                         "file_path": pdf_url,
-#                         "summary": "",  # à compléter si besoin
-#                         "source": "semantic_scholar"
-#                     }
-#                     socketio.emit('document', doc)
-#                     results.append(doc)
-#             break  # succès, sortir de la boucle retry
-#         except requests.RequestException as e:
-#             print(f"Erreur lors de la requête Semantic Scholar : {e}")
-#             time.sleep(backoff)
-#     else:
-#         print("Échec après plusieurs tentatives.")
-#     return results
 
 def reconstruct_abstract(inverted_index):
     if not isinstance(inverted_index, dict):
@@ -123,7 +104,13 @@ def reconstruct_abstract(inverted_index):
     return " ".join(sorted_words)
 
 
-def search_openalex(query="machine learning", max_results=3):
+def search_openalex(query="machine learning", max_results=3, language="en"):
+    try:
+        if language != "en":
+            query = translate_text(query, "en")
+    except Exception as e:
+        print(f"[⚠️ Traduction échouée] Query non traduite : {e}")
+
     url = f"https://api.openalex.org/works?search={query}&per-page={max_results}"
     response = requests.get(url)
     results = []
@@ -143,6 +130,16 @@ def search_openalex(query="machine learning", max_results=3):
         primary_location = item.get("primary_location") or {}
         source = primary_location.get("source") or {}
         pdf_url = source.get("url") or url
+
+        # Traduction
+        if language != "en":
+            try:
+                title = translate_text(title,language)
+                if summary and summary != "Résumé non disponible":
+                    summary = translate_text(summary, language)
+            except Exception as e:
+                print(f"[⚠️ Traduction titre/résumé OpenAlex échouée] : {e}")
+
         doc = {
             "title": title,
             "authors": authors,
@@ -156,6 +153,66 @@ def search_openalex(query="machine learning", max_results=3):
         results.append(doc)
 
     return results
+
+def search_core(query="machine learning", max_results=3, language="en"):
+    results = []
+    base_url = "https://api.core.ac.uk/v3/search/works"
+    try:
+        if language != "en":
+            query = translate_text(query, "en")
+    except Exception as e:
+        print(f"[⚠️ Traduction échouée] Query non traduite : {e}")
+
+    params = {
+        "q": query,
+        "page": 1,
+        "pageSize": max_results,
+        "fields": "title,authors,abstract,openAccessUrl,url",
+    }
+    headers = {
+        "Accept": "application/json",
+        # "Authorization": "Bearer TON_API_KEY",
+    }
+
+    try:
+        response = requests.get(base_url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        for item in data.get("results", []):
+            title = item.get("title") or "Titre non disponible"
+            authors = [a.get("name") for a in item.get("authors", []) if a.get("name")] or []
+            summary = item.get("abstract") or "Résumé non disponible"
+            pdf_url = item.get("openAccessUrl") or item.get("url") or "#"
+
+            # Traduction
+            if language != "en":
+                try:
+                    title =translate_text(title, dest=language).text
+                    if summary and summary != "Résumé non disponible":
+                        summary = translate_text(summary, dest=language).text
+                except Exception as e:
+                    print(f"[⚠️ Traduction titre/résumé CORE échouée] : {e}")
+
+            doc = {
+                "title": title,
+                "authors": authors,
+                "summary": summary,
+                "pdf_url": pdf_url,
+                "url": item.get("url") or "#",
+                "source": "core",
+            }
+
+            socketio.emit('document', doc)
+            results.append(doc)
+
+    except Exception as e:
+        print(f"Erreur CORE API: {e}")
+
+    return results
+
+
+
 
 def merge_and_deduplicate(*doc_sources):
     seen_urls = set()

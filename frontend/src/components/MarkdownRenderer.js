@@ -1,12 +1,13 @@
 import React from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm"; // ✅ ajouter ça
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 const MarkdownRenderer = ({ content }) => {
   return (
     <ReactMarkdown
-      children={content}
+      remarkPlugins={[remarkGfm]} // ✅ active GFM (liens, tableaux, etc.)
       components={{
         code({ node, inline, className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || "");
@@ -30,8 +31,20 @@ const MarkdownRenderer = ({ content }) => {
             </code>
           );
         },
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 underline hover:text-blue-800"
+          >
+            {children}
+          </a>
+        ),
       }}
-    />
+    >
+      {content}
+    </ReactMarkdown>
   );
 };
 

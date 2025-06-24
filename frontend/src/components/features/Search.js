@@ -4,7 +4,7 @@ import ProgressBar from "../ProgressBar";
 import ChatModal from "./ChatModal";
 import DocumentInsightModal from "./DocumentInsightModal";
 import LoadingOverlay from "../LoadingOverlay";
-import { toast } from 'react-toastify';
+import { toast } from "react-toastify";
 
 // Fonction de similarité cosinus
 function cosineSimilarity(vecA, vecB) {
@@ -46,11 +46,12 @@ const Search = () => {
   const [documents, setDocuments] = useState([]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isIndexing, setIsIndexing] = useState(false);
-  const [loadingFavorites, setLoadingFavorites] = useState({}); 
+  const [loadingFavorites, setLoadingFavorites] = useState({});
   const [selectedFullText, setSelectedFullText] = useState("");
   const [selectedChunks, setSelectedChunks] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
+  const [groupedResults, setGroupedResults] = useState([]);
   const allSuggestions = [
     "Large Language Models for Scientific Research",
     "Deep Learning for Medical Imaging",
@@ -65,14 +66,33 @@ const Search = () => {
   ];
   const inputRef = useRef(null);
 
-  const updateSearchHistory = (newQuery) => {
+  const updateSearchHistory = async (newQuery) => {
     if (!newQuery.trim()) return;
+
+    // ⚡ LocalStorage
     const updated = [
       newQuery,
       ...searchHistory.filter((q) => q !== newQuery),
     ].slice(0, 5);
     setSearchHistory(updated);
     localStorage.setItem("searchHistory", JSON.stringify(updated));
+
+    // ☁️ Backend (si authToken présent)
+    const token = localStorage.getItem("authToken");
+    if (token) {
+      try {
+        await fetch("http://localhost:5000/history", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query: newQuery }),
+        });
+      } catch (err) {
+        console.error("Erreur lors de la sauvegarde de l'historique:", err);
+      }
+    }
   };
 
   const handleSearch = async (searchTerm = query) => {
@@ -92,6 +112,7 @@ const Search = () => {
           query: searchTerm.trim(),
           max_results: 10,
           llm: true,
+          language,
         }),
       });
 
@@ -111,8 +132,8 @@ const Search = () => {
         }));
 
         setResults(unifiedDocs);
-        setTranslatedResults(unifiedDocs);
         setDocuments(unifiedDocs);
+        setGroupedResults(data.grouped_documents || []);
         setSummary(data.summary || "");
 
         const cits = (data.documents || []).map(
@@ -160,70 +181,6 @@ const Search = () => {
     }, 200);
   };
 
-  useEffect(() => {
-    let interval;
-    if (translating) {
-      setTranslationProgress(0);
-      interval = setInterval(() => {
-        setTranslationProgress((old) => {
-          if (old >= 90) return 90;
-          return old + 1;
-        });
-      }, 100);
-    } else {
-      setTranslationProgress(100);
-      const timeout = setTimeout(() => setTranslationProgress(0), 500);
-      return () => clearTimeout(timeout);
-    }
-    return () => clearInterval(interval);
-  }, [translating]);
-
-  const translateResults = async (lang) => {
-    if (results.length === 0) return;
-    setTranslating(true);
-
-    const textsToTranslate = results.map(
-      (doc) => `${doc.title}\n\n${doc.summary || doc.abstract || ""}`
-    );
-    if (summary) textsToTranslate.push(summary);
-    if (citations.length > 0) textsToTranslate.push(...citations);
-
-    try {
-      const res = await fetch("http://localhost:5000/multi/translate_texte", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ text: textsToTranslate, language: lang }),
-      });
-
-      const data = await res.json();
-
-      if (data.translations) {
-        const newDocuments = documents.map((doc, i) => {
-          const translatedText = data.translations[i];
-          const [translatedTitle, ...translatedSummaryParts] =
-            translatedText.split("\n\n");
-          const translatedSummary = translatedSummaryParts.join("\n\n");
-          console.log(doc);
-          return {
-            ...doc,
-            translatedTitle: translatedTitle || doc.title,
-            translatedSummary:
-              translatedSummary || doc.summary || doc.abstract || "",
-          };
-        });
-        setDocuments(newDocuments);
-      } else {
-        alert("Erreur dans la traduction");
-      }
-    } catch (err) {
-      alert("Erreur serveur: " + err.message);
-    }
-
-    setTranslating(false);
-  };
 
   const handleLiteratureReview = async () => {
     if (results.length === 0) {
@@ -261,35 +218,35 @@ const Search = () => {
     }
   };
 
-  const groupedResults = () => {
-    if (translatedResults.length <= 1) return [translatedResults];
+  // const groupedResults = () => {
+  //   if (translatedResults.length <= 1) return [translatedResults];
 
-    const embeddings = translatedResults.map((doc) =>
-      textToVector(doc.translatedText || doc.summary || doc.abstract || "")
-    );
+  //   const embeddings = translatedResults.map((doc) =>
+  //     textToVector(doc.translatedText || doc.summary || doc.abstract || "")
+  //   );
 
-    const clusters = [];
-    const assigned = new Array(translatedResults.length).fill(false);
+  //   const clusters = [];
+  //   const assigned = new Array(translatedResults.length).fill(false);
 
-    for (let i = 0; i < translatedResults.length; i++) {
-      if (assigned[i]) continue;
-      let cluster = [translatedResults[i]];
-      assigned[i] = true;
+  //   for (let i = 0; i < translatedResults.length; i++) {
+  //     if (assigned[i]) continue;
+  //     let cluster = [translatedResults[i]];
+  //     assigned[i] = true;
 
-      for (let j = i + 1; j < translatedResults.length; j++) {
-        if (!assigned[j]) {
-          const sim = cosineSimilarity(embeddings[i], embeddings[j]);
-          if (sim > 0.8) {
-            cluster.push(translatedResults[j]);
-            assigned[j] = true;
-          }
-        }
-      }
-      clusters.push(cluster);
-    }
+  //     for (let j = i + 1; j < translatedResults.length; j++) {
+  //       if (!assigned[j]) {
+  //         const sim = cosineSimilarity(embeddings[i], embeddings[j]);
+  //         if (sim > 0.8) {
+  //           cluster.push(translatedResults[j]);
+  //           assigned[j] = true;
+  //         }
+  //       }
+  //     }
+  //     clusters.push(cluster);
+  //   }
 
-    return clusters;
-  };
+  //   return clusters;
+  // };
 
   const openModal = (summaryText) => {
     setModalContent(summaryText);
@@ -298,23 +255,64 @@ const Search = () => {
   const closeModal = () => {
     setModalContent(null);
   };
-  const handleDownloadPDF = (doc) => {
-    const link = document.createElement("a");
-    link.href = doc.pdf_url;
-    link.download = `${doc.title || "document"}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownloadPDF = async (doc) => {
+    let pdfUrl = getPdfUrl(doc);
+    if (!pdfUrl) {
+      alert("URL PDF non disponible pour ce document.");
+      return;
+    }
+  
+    // Encode l'URL pour passer en paramètre
+    const proxyUrl = `http://localhost:5000/proxy_pdf?url=${encodeURIComponent(pdfUrl)}`;
+  
+    try {
+      const response = await fetch(proxyUrl);
+  
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.includes("pdf")) {
+        alert("Le fichier PDF n'est pas disponible ou l'URL est invalide.");
+        return;
+      }
+  
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+  
+      const fileName = (doc.title || "document").replace(/[^\w\d]+/g, "_") + ".pdf";
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+  
+      a.remove();
+      window.URL.revokeObjectURL(url);
+  
+    } catch (error) {
+      alert("Erreur lors du téléchargement du PDF.");
+      console.error(error);
+    }
   };
 
+const getPdfUrl = (doc) => {
+  // 1. Priorité au pdf_url s’il existe
+  if (doc.pdf_url) return doc.pdf_url;
 
-
-  function arxivToPdfUrl(url) {
-    if (url.includes("arxiv.org/abs/")) {
-      return url.replace("arxiv.org/abs/", "arxiv.org/pdf/") + ".pdf";
-    }
-    return url;
+  // 2. ArXiv : convertir abs en pdf
+  if (doc.url && doc.url.includes("arxiv.org/abs/")) {
+    return doc.url.replace("arxiv.org/abs/", "arxiv.org/pdf/") + ".pdf";
   }
+
+  // 3. CORE / OpenAlex : ils ont souvent pdf_url déjà géré en 1.
+
+  // 4. PubMed et autres : généralement pas de PDF direct, retourner page
+  if (doc.url && (doc.url.includes("pubmed.ncbi.nlm.nih.gov") || doc.url.includes("ncbi.nlm.nih.gov"))) {
+    // Pas de PDF direct dispo, retourne la page
+    return doc.url;
+  }
+
+  // 5. Par défaut, retourne url (page d'article)
+  return doc.url || "";
+};
 
   const openInsightModal = (doc, chunks, fullText) => {
     setChatDoc(doc);
@@ -322,32 +320,32 @@ const Search = () => {
     setSelectedFullText(fullText);
     setShowModal(true);
   };
-  
+
   const closeInsightModal = () => {
     setShowModal(false);
     setChatDoc(null);
     setSelectedChunks([]);
     setSelectedFullText("");
   };
-  
+
   // 🔄 Fusionne ta logique actuelle dans cette méthode
   const handleQuestionDocument = async (doc) => {
     setIsIndexing(true);
     setLoadingProgress(0);
-  
+
     try {
       const token = localStorage.getItem("authToken");
-  
+
       let fileUrl = doc.url;
       let filename =
         (doc.filename || doc.title || "document")
           .replace(/\s+/g, "_")
           .replace(/\.pdf$/, "") + ".pdf";
-  
+
       if (fileUrl.includes("arxiv.org/abs/")) {
         fileUrl = fileUrl.replace("/abs/", "/pdf/") + ".pdf";
       }
-  
+
       const simulateProgress = () => {
         setLoadingProgress((prev) => {
           if (prev >= 100) return 100;
@@ -356,24 +354,27 @@ const Search = () => {
         });
       };
       const progressInterval = setInterval(simulateProgress, 400);
-  
-      const res = await fetch("http://localhost:5000/download_external_document", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          file_url: fileUrl,
-          filename,
-          source: doc.source || "unknown",
-          original_url: doc.url,
-        }),
-      });
-  
+
+      const res = await fetch(
+        "http://localhost:5000/download_external_document",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            file_url: fileUrl,
+            filename,
+            source: doc.source || "unknown",
+            original_url: doc.url,
+          }),
+        }
+      );
+
       clearInterval(progressInterval);
       setLoadingProgress(100);
-  
+
       const data = await res.json();
       if (!res.ok || !data.document) {
         alert(data.error || "Erreur lors de l’indexation");
@@ -384,22 +385,22 @@ const Search = () => {
     } catch (err) {
       alert("❌ Erreur : " + err.message);
     }
-  
+
     setIsIndexing(false);
     setLoadingProgress(0);
   };
-  
+
   const handleShowChunks = async (doc) => {
     const token = localStorage.getItem("authToken");
     if (!token) return alert("Token non trouvé");
-  
-    const documentId = arxivToPdfUrl(doc._id); // utile si ton backend accepte les URLs
-  
+
+    const documentId = doc._id || doc.url;
+
     try {
       setIsIndexing(true);
       setLoadingProgress(0);
       setLoadingMessage("Préparation du document en cours...");
-  
+
       const chunksRes = await fetch("http://localhost:5000/document_chunks", {
         method: "POST",
         headers: {
@@ -410,29 +411,34 @@ const Search = () => {
           document_id: documentId,
           filename: doc.title || "document.pdf",
           source: doc.source || "unknown",
+          language ,
         }),
       });
-  
+
       if (!chunksRes.ok) {
         const errData = await chunksRes.json();
-        throw new Error(errData.error || "Erreur lors de la récupération des extraits");
+        throw new Error(
+          errData.error || "Erreur lors de la récupération des extraits"
+        );
       }
-  
+
       const chunksData = await chunksRes.json();
-  
+
       // Ouvre le modal fusionné avec tous les éléments nécessaires
-      openInsightModal(doc, chunksData.chunks || [], chunksData.full_text || "");
+      openInsightModal(
+        doc,
+        chunksData.chunks || [],
+        chunksData.full_text || ""
+      );
     } catch (err) {
       alert(err.message);
     }
-  
+
     setIsIndexing(false);
     setLoadingProgress(0);
     setLoadingMessage("");
   };
-  const handleFindSimilarArticles = async (doc) => {
 
-  };
   const handleAddToLibrary = async (doc) => {
     setLoadingFavorites((prev) => ({ ...prev, [doc._id]: true }));
     try {
@@ -443,14 +449,16 @@ const Search = () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ documentId: doc._id }),
+        body: JSON.stringify({
+          documentId: doc._id || doc.url || doc.title, // 👈 À adapter si _id manquant
+          documentData: doc, // 👈 Requis si le doc n'est pas dans MongoDB
+        }),
       });
 
       if (!response.ok) throw new Error("Échec de l'ajout aux favoris.");
       toast.success("Ajouté aux favoris !");
     } catch (error) {
       toast.error("Impossible d'ajouter aux favoris.");
-    
     } finally {
       setLoadingFavorites((prev) => ({ ...prev, [doc._id]: false }));
     }
@@ -462,12 +470,12 @@ const Search = () => {
           progress={translating ? translationProgress : loading ? 100 : 0}
         />
       )}
-   {isIndexing && (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex flex-col justify-center items-center z-50">
-    <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-20 w-20 mb-4"></div>
-    <p className="text-white text-lg">{loadingMessage}</p>
-  </div>
-)}
+      {isIndexing && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex flex-col justify-center items-center z-50">
+          <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-20 w-20 mb-4"></div>
+          <p className="text-white text-lg">{loadingMessage}</p>
+        </div>
+      )}
       <div className="w-full px-4 py-6 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         {/* Titre principal */}
         <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-6 sm:mb-8 text-blue-700 tracking-tight text-center sm:text-left">
@@ -497,11 +505,6 @@ const Search = () => {
                 onChange={async (e) => {
                   const lang = e.target.value;
                   setLanguage(lang);
-                  if (results.length > 0) {
-                    setTranslating(true);
-                    await translateResults(lang);
-                    setTranslating(false);
-                  }
                 }}
                 className="w-full rounded-md border border-gray-400 text-gray-800 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-gray-300"
                 disabled={loading || translating}
@@ -642,18 +645,19 @@ const Search = () => {
         )}
 
         {/* Résultats regroupés */}
-        {translatedResults.length > 0 && (
-          <div>
+        {groupedResults.length > 0 && (
+          <div className="mt-10">
             <h2 className="text-3xl font-bold mb-6 text-blue-800">
-              Résultats regroupés par similarité thématique
+              Résultats regroupés par thème
             </h2>
-            {groupedResults().map((cluster, idx) => (
-              <div key={idx} className="mb-8">
-                <h3 className="text-2xl font-semibold mb-4">
-                  Groupe {idx + 1} ({cluster.length} documents)
+
+            {groupedResults.map((group, idx) => (
+              <div key={idx} className="mb-10">
+                <h3 className="text-2xl font-semibold mb-4 text-indigo-700">
+                  🧠 {group.theme} ({group.documents.length} articles)
                 </h3>
 
-                {cluster.map((doc, i) => (
+                {group.documents.map((doc, i) => (
                   <div
                     key={doc._id || doc.url || doc.title || i}
                     onClick={() =>
@@ -664,12 +668,11 @@ const Search = () => {
                     className="mb-4 p-5 border rounded-xl hover:bg-blue-50 hover:shadow-md transition cursor-pointer flex flex-col md:flex-row justify-between items-start gap-4"
                     title="Cliquez pour voir le résumé complet"
                   >
-                    {/* Partie gauche : contenu texte */}
+                    {/* Partie gauche : texte */}
                     <div className="flex-1 min-w-0">
                       <h4 className="text-xl font-bold text-gray-900 mb-2 break-words">
                         {doc.translatedTitle || doc.title}
                       </h4>
-
                       <p className="text-gray-700 text-sm leading-relaxed line-clamp-4 break-words">
                         {doc.translatedSummary || doc.summary || doc.abstract}
                       </p>
@@ -698,21 +701,22 @@ const Search = () => {
                           <span className="hidden sm:inline">Télécharger</span>
                         </button>
                         <button
-                        onClick={(e) => {e.stopPropagation();
-                          handleAddToLibrary(doc);}}
-                        disabled={loadingFavorites[doc._id]}
-                        className={`px-3 py-1.5 rounded text-sm ${
-                          loadingFavorites[doc._id]
-                            ? "bg-gray-400 cursor-not-allowed"
-                            : "bg-yellow-400 text-yellow-900 hover:bg-yellow-500"
-                        } transition`}
-                      >
-                        {loadingFavorites[doc._id]
-                          ? "Ajout en cours..."
-                          : "⭐ Ajouter aux favoris"}
-                      </button>
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddToLibrary(doc);
+                          }}
+                          disabled={loadingFavorites[doc._id]}
+                          className={`px-3 py-1.5 rounded text-sm ${
+                            loadingFavorites[doc._id]
+                              ? "bg-gray-400 cursor-not-allowed"
+                              : "bg-yellow-400 text-yellow-900 hover:bg-yellow-500"
+                          } transition`}
+                        >
+                          {loadingFavorites[doc._id]
+                            ? "Ajout en cours..."
+                            : "⭐ Ajouter aux favoris"}
+                        </button>
                       </div>
-                    
                     </div>
 
                     {/* Partie droite : actions secondaires */}
@@ -740,35 +744,23 @@ const Search = () => {
                         💬 Discussion & Extraits
                       </button>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleFindSimilarArticles(doc);
-                        }}
-                        className="px-3 py-2 bg-indigo-100 text-indigo-800 rounded hover:bg-indigo-200 transition flex items-center gap-2 text-sm w-full md:w-auto justify-center"
-                        title="Rechercher des articles similaires"
-                      >
-                        🧪 Articles similaires
-                      </button>
+                  
                     </div>
                   </div>
                 ))}
               </div>
             ))}
 
-          {showModal && chatDoc && (
-            <DocumentInsightModal
-              isOpen={showModal}
-              onClose={closeInsightModal}
-              document={chatDoc}
-              chunks={selectedChunks}
-              fullText={selectedFullText}
-            />
-          )}
-
-
+            {showModal && chatDoc && (
+              <DocumentInsightModal
+                isOpen={showModal}
+                onClose={closeInsightModal}
+                document={chatDoc}
+                chunks={selectedChunks}
+                fullText={selectedFullText}
+              />
+            )}
           </div>
-          
         )}
 
         {/* Modal */}

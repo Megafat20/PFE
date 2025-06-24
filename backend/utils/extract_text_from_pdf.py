@@ -1,7 +1,7 @@
 import fitz  # PyMuPDF
 import pdfplumber
 from collections import defaultdict
-
+import re
 def extract_pdf_content(filepath):
     doc = fitz.open(filepath)
     text_sections = []
@@ -88,12 +88,52 @@ def generate_table_of_contents(text):
     chunks = chunk_text(text, max_tokens=512)
     toc_parts = []
     for chunk in chunks:
-        prompt = f"Génère une table des matières structurée à partir de ce texte (français) :\n\n{chunk}"
+        prompt = f"""
+Tu es un assistant expert en structuration de documents académiques.
+Génère une vraie table des matières hiérarchique à partir du contenu suivant.
+Utilise un format avec des numéros (ex : 1., 1.1, 1.2...) et des titres pertinents.
+
+Texte :
+{chunk}
+"""
         output = summarizer(prompt, max_length=200, min_length=50, do_sample=False)
         toc_parts.append(output[0]["summary_text"])
-    return "\n".join(toc_parts)
 
+    full_raw_toc = "\n".join(toc_parts)
+    formatted = format_table_of_contents(full_raw_toc)
+    return "\n".join(formatted)
+
+
+    return "\n".join(toc_parts)
 def extract_key_passages(text):
-    prompt = f"Extrait les passages les plus pertinents (3 à 5) du texte suivant, en français :\n\n{text[:4000]}"
-    output = summarizer(prompt, max_length=250, min_length=60, do_sample=False)
-    return output[0]["summary_text"]    
+    chunks = chunk_text(text, max_tokens=512)
+    highlights = []
+
+    for chunk in chunks[:2]:  # on limite à 2 morceaux max pour éviter surcharge
+        prompt = f"Extrait les passages les plus pertinents (3 à 5) du texte suivant, en français :\n\n{chunk}"
+        output = summarizer(prompt, max_length=250, min_length=60, do_sample=False)
+        highlights.append(output[0]["summary_text"])
+
+    return "\n\n".join(highlights)
+
+def format_table_of_contents(raw_toc):
+    lines = raw_toc.strip().split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        # Nettoyage : supprime les caractères inutiles ou intro non structurée
+        line = line.strip().lstrip("•-–—●").strip()
+
+        # Forcer un format numéroté s’il n'existe pas
+        if not re.match(r"^\d+(\.\d+)*\s", line):
+            if cleaned_lines:
+                # sous-section implicite
+                last_number = cleaned_lines[-1].split()[0]
+                prefix = f"{last_number}.1" if '.' in last_number else f"{int(last_number)+1}.1"
+                line = f"{prefix} {line}"
+            else:
+                line = f"1. {line}"
+
+        cleaned_lines.append(line)
+
+    return cleaned_lines
