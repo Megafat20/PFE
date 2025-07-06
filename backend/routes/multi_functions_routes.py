@@ -14,7 +14,8 @@ import os
 from fpdf import FPDF
 import traceback
 import requests
-
+import json
+from deep_translator import GoogleTranslator
 
 bp_multi = Blueprint("multi_functions", __name__)
 
@@ -43,7 +44,7 @@ def ollama_query(prompt, model="llama3", stream=False):
                         clean = line.decode("utf-8").replace("data: ", "")
                         if clean.strip() == "[DONE]":
                             break
-                        chunk = eval(clean)
+                        chunk = json.loads(clean)
                         yield chunk.get("message", {}).get("content", "")
                     except Exception as e:
                         print(f"[Streaming error] {e}")
@@ -304,15 +305,15 @@ def generate_report(user):
         language = data.get("language", "fr")
         style = data.get("style", "scientifique")
 
-        blocks_text = "\n".join(f"- {block}" for block in content_blocks)
 
         prompt = (
-            f"Tu es un expert en rédaction {style}. Rédige un rapport professionnel en {language} "
-            f"selon l'objectif et les contenus suivants :\n\n"
-            f"Objectif :\n{objective}\n\n"
-            f"Contenus :\n{blocks_text}\n\n"
-            f"Génère un rapport structuré avec des titres et sous-titres adaptés au style {style}."
-        )
+        f"Tu es un expert en rédaction {style}. En te basant uniquement sur l'objectif suivant :\n\n"
+        f"{objective}\n\n"
+        f"Génère un rapport complet et structuré en {language} comportant les parties appropriées "
+        f"(comme l’introduction, la méthodologie, les résultats, la discussion, la conclusion...). "
+        f"Utilise un style {style}, clair et professionnel, avec des titres et sous-titres adaptés."
+    )
+
 
         def generate():
             for chunk in ollama_query(prompt, stream=True):  # 🧠 ton modèle doit supporter `stream=True`
@@ -348,6 +349,8 @@ def generate_report_pdf(user):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+from langdetect import detect
+
 @bp_multi.route('/paraphrase', methods=['POST'])
 @token_required
 def paraphrase(user):
@@ -358,23 +361,36 @@ def paraphrase(user):
     if not texte:
         return jsonify({'error': 'Pas de texte fourni'}), 400
 
-    # Dictionnaire de styles → instructions personnalisées
+    # Détecter la langue d'origine du texte
+    try:
+        detected_lang = detect(texte)
+    except:
+        detected_lang = "fr"  # fallback
+
+    # Instructions personnalisées
     style_prompts = {
-        "fluent": "Reformule ce texte de manière fluide et naturelle :",
-        "formal": "Reformule ce texte dans un style formel :",
-        "creative": "Reformule ce texte de manière créative et originale :",
-        "academic": "Reformule ce texte dans un style académique clair et rigoureux :",
-        "professional": "Reformule ce texte dans un style professionnel :",
+        "fluent": "Reformule ce texte de manière fluide et naturelle",
+        "formal": "Reformule ce texte dans un style formel",
+        "creative": "Reformule ce texte de manière créative et originale",
+        "academic": "Reformule ce texte dans un style académique clair et rigoureux",
+        "professional": "Reformule ce texte dans un style professionnel",
     }
 
     instruction = style_prompts.get(style, style_prompts["fluent"])
-    prompt = f"{instruction} {texte}"
+
+    # Ajoute la consigne explicite sur la langue
+    prompt = (
+        f"{instruction}.\n"
+        f"Réponds dans la même langue que le texte d’origine ({detected_lang}).\n\n"
+        f"Texte : {texte}"
+    )
 
     try:
         reformulation = ollama_query(prompt)
         return jsonify({'paraphrase': reformulation})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 # --- Fonctions supplémentaires ---
 
@@ -477,7 +493,7 @@ def handle_document_search(user):
             for theme, docs in grouped.items()
         ]
 
-        review_summary = generate_literature_summary(merged_docs, query)
+        review_summary = generate_literature_summary(merged_docs, query , language)
         return jsonify({
             "grouped_documents": grouped_documents,
             "summary": review_summary
@@ -488,7 +504,13 @@ def handle_document_search(user):
         return jsonify({"search_error": str(e)}), 500
     
 
-def generate_literature_summary(docs, query):
+def translate_text(text, target_lang):
+    try:
+        return GoogleTranslator(source='auto', target=target_lang).translate(text)
+    except Exception:
+        return text  # fallback
+
+def generate_literature_summary(docs, query , language):
     from textwrap import shorten
     import requests
 
@@ -499,12 +521,11 @@ def generate_literature_summary(docs, query):
         entries += f"Summary: {shorten(doc.get('summary', ''), width=500)}\n\n"
 
     prompt = (
-        f"Tu es un expert scientifique. Fais une revue de littérature sur : '{query}'.\n\n"
-        f"Voici quelques articles trouvés :\n\n{entries}\n"
-        "Élabore une synthèse des idées principales, des approches, des tendances et des limites."
+        f"You are a scientific expert. Write a literature review about: '{query}'.\n\n"
+        f"Here are a few articles:\n\n{entries}\n"
+        "Write a structured and concise synthesis of the main ideas, approaches, trends, and limitations."
     )
 
-    # Appel à Ollama (DeepSeek ou autre)
     try:
         response = requests.post(
             "http://localhost:11434/api/generate",
@@ -515,7 +536,12 @@ def generate_literature_summary(docs, query):
             }
         )
         result = response.json()
-        return result.get("response", "")
+        summary = result.get("response", "")
+
+        # ✅ Traduction automatique en français
+        summary_fr = translate_text(summary, language)
+        return summary_fr
+
     except Exception as e:
         print("Erreur LLM:", e)
         return "Synthèse non disponible (erreur lors de l'appel au modèle)."

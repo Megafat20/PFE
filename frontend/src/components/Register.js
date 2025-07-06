@@ -1,31 +1,37 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from './AuthProvider'; // Utilise le contexte
 import './AuthStyles.css';
 
-const Register = ({ onRegister }) => {
+const Register = () => {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { setUser } = useAuth(); // Récupère setUser
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    setError('');
     try {
       const res = await fetch('http://localhost:5000/auth/register', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password }),
       });
-
       const data = await res.json();
-
+      console.log("Status:", res.status, "Données:", data);
+  
       if (res.ok) {
-        // Appeler la fonction onRegister pour mettre à jour l'état de l'utilisateur dans App.js
-        onRegister({ name, email }); // Passez l'objet utilisateur
-        navigate('/ChatApp'); // Redirige vers ChatApp
+        // Stocker le token JWT
+        localStorage.setItem('authToken', data.token);
+  
+        // Mettre à jour le contexte utilisateur (avec ce que tu veux)
+        setUser({ name, email });
+  
+        // Rediriger vers la page principale
+        navigate('/chatapp');
       } else {
         setError(data.error || 'Erreur lors de l\'inscription');
       }
@@ -33,7 +39,6 @@ const Register = ({ onRegister }) => {
       setError('Erreur réseau');
     }
   };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100 px-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
@@ -77,13 +82,6 @@ const Register = ({ onRegister }) => {
             S'inscrire
           </button>
         </form>
-
-        <p className="mt-6 text-center text-sm text-gray-600">
-          Déjà un compte ?{' '}
-          <a href="/login" className="text-emerald-600 hover:underline">
-            Se connecter
-          </a>
-        </p>
       </div>
     </div>
   );

@@ -1,10 +1,11 @@
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-import re
+
 import eventlet
 eventlet.monkey_patch()
 import traceback
+import re
 import requests
 from datetime import datetime, timedelta
 import numpy as np
@@ -24,6 +25,7 @@ from langchain.schema import Document
 import faiss
 import langid
 import logging
+from utils.traitement_document import clean_text
 from data_ingestion import search_arxiv, search_pubmed, search_openalex, merge_and_deduplicate
 from utils import mongo, token_required
 from utils.faiss_index import delete_from_index,update_faiss_index,CachedEmbeddingModel
@@ -36,7 +38,8 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from bson import ObjectId
 from rank_bm25 import BM25Okapi
-
+import httpx
+from bs4 import BeautifulSoup
 # --- Config Flask ---
 app = Flask(__name__)
 app.config.update({
@@ -144,23 +147,20 @@ def preprocess_text(text):
     stop_words = set(stopwords.words('english'))
     return [word for word in tokens if word.isalnum() and word not in stop_words]
 
-def hybrid_search(query, store,conv_id,uid, top_k=5):
-    
+def hybrid_search(query, store, conv_id, uid, top_k=5):
     if store is None:
         return "", []
-    """Recherche hybride : FAISS + BM25 avec logs pour debug"""
+
     embedding_model = CachedEmbeddingModel(uid)
     query_vector = embedding_model.embed_query(query)
 
-    # Recherche sémantique (FAISS)
     semantic_results = store.similarity_search_with_score_by_vector(query_vector, top_k=top_k)
-    # Recherche lexicale (BM25)
+
     documents = list(mongo.db.documents.find({
         "user_id": ObjectId(uid),
         "conversation_id": conv_id
     }))
     if not documents:
-        print("❌ Aucun document trouvé en base MongoDB.")
         return "⚠️ Aucun document disponible pour la recherche.", []
 
     contents = [doc['content'] for doc in documents]
@@ -168,7 +168,6 @@ def hybrid_search(query, store,conv_id,uid, top_k=5):
     bm25 = BM25Okapi(tokenized_corpus)
     bm25_scores = bm25.get_scores(preprocess_text(query))
 
-    # Top résultats BM25
     top_bm25 = np.argsort(bm25_scores)[::-1][:top_k]
     bm25_results = [{
         "content": documents[i]['content'],
@@ -178,8 +177,6 @@ def hybrid_search(query, store,conv_id,uid, top_k=5):
     } for i in top_bm25]
 
     results = []
-
-    # ✅ MODIF : Ne filtre pas par score FAISS (uniquement longueur)
     for doc, score in semantic_results:
         if len(doc.page_content.strip()) > 100:
             results.append({
@@ -189,27 +186,42 @@ def hybrid_search(query, store,conv_id,uid, top_k=5):
                 "type": "semantic"
             })
 
-    # ✅ MODIF : Tolérance plus grande pour BM25
     for r in bm25_results:
         if r['score'] > 0.2 and not any(r['content'] == res['content'] for res in results):
             results.append(r)
 
     if not results:
-        print("❌ Aucun résultat trouvé par FAISS ni BM25.")
         return "⚠️ Aucun résultat pertinent trouvé dans vos documents.", []
 
-    # ✅ Tri mixte selon le type
-    results.sort(key=lambda r: r['score'] if r['type'] == 'semantic' else -r['score'])
+    # Tri décroissant sur score (quel que soit le type)
+    results.sort(key=lambda r: r['score'], reverse=True)
 
-    # Génération du contexte
+    def is_relevant_text(text):
+        text = text.strip()
+        if len(text) < 200:
+            return False
+        if re.match(r'^[A-Z][a-z]+(, [A-Z][a-z]+)+', text):
+            return False
+        return True
+
+    filtered_results = [r for r in results if is_relevant_text(r['content'])]
+
     context_str = "DOCUMENT CONTEXT (Use only if directly relevant to the question):\n"
-    sources_used = []
-    for i, r in enumerate(results[:3]):
-        context_str += f"\n--- Source {i+1} ({r['type']}) ---\n{r['content'][:1000]}\n"
-        sources_used.append({"source": r["source"], "type": r["type"]})
+    max_context_len = 3000  # ajuster selon ta limite tokens
+    current_len = 0
+
+    for i, r in enumerate(filtered_results):
+        content_clean = clean_text(r['content'])
+        if current_len + len(content_clean) > max_context_len:
+            break
+        context_str += f"\n--- Source {i+1} ({r['type']}) ---\n{content_clean}\n\n"
+        current_len += len(content_clean)
 
     print(f"✅ CONTEXT GÉNÉRÉ POUR LA QUESTION : {query}\n{context_str}")
+    sources_used = [{"source": r["source"], "type": r["type"]} for r in filtered_results]
+
     return context_str, sources_used
+
 
 
 def load_faiss_index_for_user(uid, conv_id):
@@ -253,6 +265,26 @@ def on_disconnect():
     user_id = connected_users.pop(request.sid, None)
     print(f"[disconnect] 🔌 Déconnexion : {user_id}")
     
+    
+LINK_KEYWORDS = ["ressources", "liens", "documentation", "tutoriels", "apprendre", "site", "vidéo"]
+
+# 🔍 Recherche DuckDuckGo
+def search_duckduckgo(query, max_results=3):
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    url = f"https://html.duckduckgo.com/html?q={query}"
+    try:
+        resp = httpx.get(url, headers=headers, timeout=5)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        results = []
+        for a in soup.select('.result__a', limit=max_results):
+            text = a.get_text().strip()
+            href = a.get("href")
+            results.append(f"[{text}]({href})")
+        return results
+    except Exception as e:
+        print(f"[🔍 DuckDuckGo] Erreur: {e}")
+        return []
+
 @socketio.on("chat_message")
 def handle_message(data):
     import traceback
@@ -320,10 +352,7 @@ def handle_message(data):
             for msg in history
         )
 
-    def emit_stream(text):
-        for token in text.split():
-            emit("stream_response", {"token": token + " "}, room=request.sid, namespace="/")
-            socketio.sleep(0.01)
+
 
     def save_history(conv_id, user_input, assistant_output):
         if conv_id:
@@ -341,17 +370,37 @@ def handle_message(data):
                 headers=headers,
             )
 
-    # Recherche réponse validée similaire (optionnel)
+        # Recherche réponse validée similaire (optionnel)
     try:
         result = find_validated_answer_similar(user_input)
         if result["found"]:
-            print(f"[handle_message] Réponse validée trouvée avec similarité {result['similarity']:.2f}")
-            emit_stream(str(result["answer"]))
-            socketio.emit("stream_end", room=request.sid, namespace="/")
-            return
-    except Exception as e:
-        print(f"[handle_message] Erreur recherche validée: {e}")
+            validated_answer = result["answer"]
+            print(f"[handle_message] ✅ Réponse validée trouvée (simil. {result['similarity']:.2f})")
+            print(f"Longueur réponse validée: {len(validated_answer)}")
+            full_response = ""
 
+            for char in validated_answer:
+                full_response += char
+                emit("stream_response", {"token": char})
+                socketio.sleep(0.01)
+
+            emit("stream_end")
+            save_history(conv_id, user_input, full_response.strip())
+    except Exception as e:
+        print(f"[handle_message] ⚠️ Erreur recherche validée: {e}")
+
+    if any(keyword in user_input.lower() for keyword in LINK_KEYWORDS):
+        print("[🔗] Recherche automatique de liens...")
+        results = search_duckduckgo(user_input)
+        if results:
+            response = "Voici quelques liens utiles pour approfondir :\n" + "\n".join(results)
+            for token in re.findall(r'\S+\s*', response):
+                emit("stream_response", {"token": token})
+                socketio.sleep(0.001)
+            save_history(conv_id, user_input, response)
+            emit("stream_end")
+            return
+        
     continuity_instruction = (
         "Voici un extrait de conversation précédente entre l'utilisateur et toi. "
         "Si la nouvelle question est indépendante ou sans lien clair, réponds directement sans utiliser l'historique. "
@@ -367,7 +416,8 @@ def handle_message(data):
                 personality,
                 context,
                 f"Tu es un assistant IA. Tu réponds toujours en {lang_name}.",
-                "⚠️ RÈGLE OBLIGATOIRE : Tu dois inclure un lien web au format Markdown [Nom](https://exemple.com) chaque fois que tu mentionnes une ressource, vidéo, site, ou documentation. Le lien doit être fonctionnel et cliquable. Ne donne pas de titre sans lien.",
+                "⚠️ INSTRUCTION : Tu dois répondre uniquement à partir des extraits documentaires fournis. "
+                "Si tu ne trouves pas la réponse dans ces extraits, répond honnêtement que l'information n'est pas disponible.",
                 prompt_suffix,
                 "[INSTRUCTION IMPORTANTE]\n" + continuity_instruction + "\n[FIN INSTRUCTION]",
                 extra_context,
@@ -382,6 +432,7 @@ def handle_message(data):
             history = get_conversation_history(conv_id, k=5) if conv_id else []
             formatted_history = format_history(history)
             system_prompt = create_system_prompt(formatted_history)
+
             print(f"[chat_message] 🔁 Génération directe (force_llm) via ({model_name})")
 
             stream = ollama.chat(
@@ -393,21 +444,33 @@ def handle_message(data):
                 stream=True,
             )
 
-            buffer = ""
-            try:
-                for chunk in stream:
-                    token = chunk["message"]["content"].strip()
-                    buffer += token 
+            full_response = ""
+
+            for chunk in stream:
+                text = chunk["message"]["content"]
+                full_response += text
+
+                for char in text:
+                    emit("stream_response", {"token": char})
+                    socketio.sleep(0.001)
+
+            # Recherche des liens après la génération
+            real_links = search_duckduckgo(user_input)
+            links_text = ""
+            if real_links:
+                links_text = "\n\n📚 Ressources utiles :\n" + "\n".join(real_links)
+                for token in re.findall(r'\S+\s*', links_text):
                     emit("stream_response", {"token": token})
-            except Exception as e:
-                emit("stream_response", {"token": f"⚠️ Erreur lors du streaming : {e}"})
-            finally:
-                save_history(conv_id, user_input, buffer.strip())
-                emit("stream_end")
+                    socketio.sleep(0.005)
+
+            # Sauvegarde complète
+            save_history(conv_id, user_input, (full_response + links_text).strip())
+
+            emit("stream_end")
         except Exception as e:
             print(f"[LLM force_llm] ⚠️ Exception: {e}\n{traceback.format_exc()}")
             emit("stream_response", {"token": f"⚠️ Erreur LLM: {e}"})
-            return
+
 
     # --- Logique RAG classique ---
     try:
@@ -418,9 +481,26 @@ def handle_message(data):
         context_str, combined_docs = hybrid_search(user_input, store, conv_id, uid, top_k=5)
         history = get_conversation_history(conv_id, k=5) if conv_id else []
         formatted_history = format_history(history)
+        if combined_docs:  
+            extra_context = (
+                "Tu es un assistant intelligent. Réponds d’abord uniquement à partir des informations fournies ci-dessous.\n"
+                "✅ Si tu trouves des éléments pertinents dans le contexte, base ta réponse uniquement sur ceux-ci.\n"
+                "✅ Si aucun élément pertinent ne répond à la question, utilise tes propres connaissances de manière fiable.\n"
+                "❌ Ne parle jamais du nom des fichiers, de leur chemin ou de leur origine.\n"
+                "❌ Ignore les éléments qui ne font pas partie du contenu (ex : noms d’auteur, liens, titres hors texte).\n\n"
 
-        if combined_docs:
-            extra_context = f"[CONTEXTE DOCUMENTAIRE]\n{context_str}\n[FIN CONTEXTE]\n\n[CONVERSATION PRÉCÉDENTE]\n{formatted_history}[FIN CONVERSATION]\n\nNouvelle question : {user_input}\nRéponse :"
+                "🗂️ CONTEXTE DOCUMENTAIRE :\n"
+                f"{context_str}\n"
+                "🔚 FIN DU CONTEXTE\n\n"
+
+                "💬 CONVERSATION PRÉCÉDENTE :\n"
+                f"{formatted_history}\n"
+                "🔚 FIN CONVERSATION\n\n"
+
+                f"❓ Question : {user_input}\n"
+                "✍️ Réponse :"
+            )
+
             system_prompt = create_system_prompt(formatted_history, extra_context=extra_context)
             stream = ollama.chat(
                 model=model_name,
@@ -430,17 +510,19 @@ def handle_message(data):
                 ],
                 stream=True,
             )
-            buffer = ""
-            try:
-                for chunk in stream:
-                    token = chunk["message"]["content"].strip()
-                    buffer += token + " "
-                    emit("stream_response", {"token": token + " "})
-            except Exception as e:
-                emit("stream_response", {"token": f"⚠️ Erreur lors du streaming : {e}"})
-            finally:
-                save_history(conv_id, user_input, buffer.strip())
-                emit("stream_end")
+            full_response = ""
+
+            for chunk in stream:
+                text = chunk["message"]["content"]
+                full_response += text
+
+                for char in text:
+                    emit("stream_response", {"token": char})
+                    socketio.sleep(0.001)
+
+            save_history(conv_id, user_input, full_response.strip())
+
+            emit("stream_end")     
         else:
             print("[chat_message] ⚠️ Aucun document pertinent trouvé - fallback LLM activé")
 
@@ -448,15 +530,20 @@ def handle_message(data):
         if str(e) == "NoIndex":
             pass  # fallback silencieux
         else:
-            emit("stream_response", {"token": f"⚠️ Erreur RAG: {e}"})
+           emit("stream_response", {"token": f"⚠️ Erreur RAG: {e}", "is_error": True})
 
     # --- Fallback génération directe ---
     try:
         def log_conversation_history(history):
-            return "".join(
-                f"{i+1}. {'Utilisateur' if msg['role'] == 'user' else 'Assistant'} : {msg['content'][:100].replace(chr(10), ' ')}\n"
-                for i, msg in enumerate(history)
-            )
+            lines = []
+            for msg in history:
+                role = msg.get('role') or msg.get('sender') or 'user'
+                content = msg.get('content') or msg.get('text') or ''
+                speaker = "Utilisateur" if role == "user" else "Assistant"
+                lines.append(f"{speaker} : {content}\n")
+            return "".join(lines)
+
+
 
         history = get_conversation_history(conv_id, k=5)
         formatted_history = log_conversation_history(history)
@@ -471,23 +558,33 @@ def handle_message(data):
             ],
             stream=True,
         )
-        buffer =""
-        try:
-            for chunk in stream:
-                token = chunk["message"]["content"].strip()
-                buffer += token
-                emit("stream_response", {"token": token })  # <-- ici, dans la boucle !
-        except Exception as e:
-            emit("stream_response", {"token": f"⚠️ Erreur lors du streaming : {e}"})
-        finally:
-            save_history(conv_id, user_input, buffer.strip())
-            emit("stream_end")
+        full_response = ""
 
+        for chunk in stream:
+            text = chunk["message"]["content"]
+            full_response += text
+
+            for char in text:
+                emit("stream_response", {"token": char})
+                socketio.sleep(0.001)
+
+        # Recherche des liens après la génération
+        real_links = search_duckduckgo(user_input)
+        links_text = ""
+        if real_links:
+            links_text = "\n\n📚 Ressources utiles :\n" + "\n".join(real_links)
+            for token in re.findall(r'\S+\s*', links_text):
+                emit("stream_response", {"token": token})
+                socketio.sleep(0.005)
+
+        # Sauvegarde complète
+        save_history(conv_id, user_input, (full_response + links_text).strip())
+
+        emit("stream_end")
     except Exception as e:
         print(f"[LLM Fallback] ⚠️ Exception: {e}\n{traceback.format_exc()}")
         emit("stream_response", {"token": f"⚠️ Erreur LLM: {e}"})
-    finally:
-        socketio.emit("stream_end", room=request.sid)
+
 
 
 

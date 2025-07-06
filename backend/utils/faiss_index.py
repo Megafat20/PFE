@@ -52,47 +52,45 @@ def get_cached_embedding(text, uid, embedding_type="query"):
 
     return vector
 
-def delete_from_index(doc_path, user_id):
-    """
-    Supprime un document FAISS en fonction de son chemin (doc_path) et du user_id
-    """
+def delete_from_index(user_id, doc_ids=None, doc_path=None):
     index_path = os.path.join("documents", str(user_id), "faiss_index")
-
     if not os.path.exists(index_path):
         print(f"Index FAISS non trouvé pour l'utilisateur {user_id}")
         return False
 
-    # Initialiser l'embedding
     embedding = OllamaEmbeddings(model="nomic-embed-text")
 
     try:
-        # Charger l'index existant
         store = FAISS.load_local(index_path, embedding, allow_dangerous_deserialization=True)
-
-
-        # Supprimer le document avec ce chemin
         initial_count = len(store.docstore._dict)
 
-        # Garder seulement les documents dont le metadata source est différent
-        keys_to_keep = [
-            k for k, doc in store.docstore._dict.items()
-            if doc.metadata.get("source") != doc_path
-        ]
+        if doc_ids:
+            # Supprimer tous les docs dont l'id est dans doc_ids
+            keys_to_keep = [
+                k for k in store.docstore._dict.keys()
+                if k not in doc_ids
+            ]
+        elif doc_path:
+            keys_to_keep = [
+                k for k, doc in store.docstore._dict.items()
+                if doc.metadata.get("source") != doc_path
+            ]
+        else:
+            print("Aucun critère de suppression fourni")
+            return False
 
-        # Mise à jour de l'index avec les documents à garder
         new_docstore = {k: store.docstore._dict[k] for k in keys_to_keep}
         store.docstore._dict = new_docstore
         store.index_to_docstore_id = {i: k for i, k in enumerate(new_docstore.keys())}
 
-        # Sauvegarde
         store.save_local(index_path)
-        print(f"Document supprimé de l'index FAISS: {doc_path}")
+        print(f"Suppression dans index FAISS effectuée pour user {user_id}")
+        return len(new_docstore) < initial_count
 
-        return len(new_docstore) < initial_count  # True si suppression faite
     except Exception as e:
         print(f"Erreur suppression FAISS: {e}")
         return False
-    
+
 def update_faiss_index(index_folder, documents, user_id):
     try:
         embedding = CachedEmbeddingModel(user_id)

@@ -108,73 +108,77 @@ function App({ }) {
     return () => s.disconnect();
   }, [loading, navigate]);
 
-
-  
   const bufferRef = useRef("");
+const timeoutRef = useRef(null);
 
-  useEffect(() => {
-    if (!socket) return;
-  
-    const onStreamResponse = ({ token }) => {
-      console.log("Token reçu:", token);
+useEffect(() => {
+  if (!socket) return;
+
+  const handleStreamResponse = ({ token }) => {
+    bufferRef.current += token;
+
+    if (!timeoutRef.current) {
+      startTypingAnimation();
       setIsTyping(true);
-      setBuffer((prev) => prev + token);
-    };
-  
-    const onStreamEnd = () => {
-      console.log("Stream terminé, buffer:", bufferRef.current);
-      setBuffer(bufferRef.current);
-      bufferRef.current = "";
-      setIsTyping(false);
-    };
-  
-    socket.on("stream_response", onStreamResponse);
-    socket.on("stream_end", onStreamEnd);
-  
-    return () => {
-      socket.off("stream_response", onStreamResponse);
-      socket.off("stream_end", onStreamEnd);
-    };
-  }, [socket]);
+    }
+  };
 
-  useEffect(() => {
-    if (!isTyping || !buffer) return;
-  
-    const words = buffer.trim().split(/\s+/); // découpe en mots entiers
-    let idx = 0;
-    let displayed = "";
-  
-    const interval = setInterval(() => {
-      if (idx < words.length) {
-        displayed += words[idx] + " ";
-  
-        setChat(prev => {
-          const copy = [...prev];
-          if (copy.length && copy[copy.length - 1].sender === "botTyping") {
-            copy[copy.length - 1].text = displayed.trim();
-          } else {
-            copy.push({ sender: "botTyping", text: displayed.trim() });
-          }
-          return copy;
-        });
-  
-        idx++;
+  const handleStreamEnd = () => {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+
+    setChat(prev =>
+      prev.map(msg =>
+        msg.sender === "botTyping"
+          ? { ...msg, sender: "bot", text: msg.text.trim() }
+          : msg
+      )
+    );
+    setIsTyping(false);
+  };
+
+  socket.on("stream_response", handleStreamResponse);
+  socket.on("stream_end", handleStreamEnd);
+
+  return () => {
+    socket.off("stream_response", handleStreamResponse);
+    socket.off("stream_end", handleStreamEnd);
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+  };
+}, [socket]);
+
+const startTypingAnimation = () => {
+  const typeNext = () => {
+    if (bufferRef.current.length === 0) {
+      timeoutRef.current = null;
+      return;
+    }
+
+    const nextChar = bufferRef.current[0];
+    bufferRef.current = bufferRef.current.slice(1);
+
+    setChat(prev => {
+      const lastMsg = prev[prev.length - 1];
+      if (lastMsg && lastMsg.sender === "botTyping") {
+        const updatedMsg = {
+          ...lastMsg,
+          text: lastMsg.text + nextChar
+        };
+        return [...prev.slice(0, -1), updatedMsg];
       } else {
-        clearInterval(interval);
-        setChat(prev =>
-          prev.map(m =>
-            m.sender === "botTyping" ? { sender: "bot", text: m.text.trim() } : m
-          )
-        );
-        setBuffer("");
-        setIsTyping(false);
+        return [...prev, { sender: "botTyping", text: nextChar }];
       }
-    }, 40);
-  
-    return () => clearInterval(interval);
-  }, [buffer, isTyping]);
-  
+    });
 
+    const typingSpeed = 3 + Math.random() * 4; // Ajuster ici la vitesse
+    timeoutRef.current = setTimeout(typeNext, typingSpeed);
+  };
+
+  typeNext();
+};
+
+  
   // ✉️ Envoi du message utilisateur
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -506,7 +510,7 @@ function App({ }) {
               <option value="llama3">Llama 3</option>
               <option value="deepseek-coder:6.7b">DeepSeek-coder</option>
               <option value="mistral:7b-instruct">Mistral</option>
-              <option value="gemini">Gemini</option>
+              <option value="gemma:latest">Gemma</option>
             </select>
           </div>
   
@@ -561,7 +565,7 @@ function App({ }) {
               chat.map((msg, i) => {
                 const isUser = (msg.role || msg.sender) === "user";
                 const isTyping = msg.sender === "botTyping";
-  
+                
                 const handleRate = async (star, index) => {
                   const token = localStorage.getItem("authToken");
                   setRatings((prev) => ({ ...prev, [index]: star }));
@@ -613,41 +617,38 @@ function App({ }) {
                   </div>
                 );
   
-                return (
-                  <div
-                    key={i}
-                    className={`max-w-[70%] p-3 rounded-md whitespace-pre-wrap border ${
-                      isUser ? "self-end bg-blue-50 border-blue-200" : "self-start bg-gray-100 border-gray-300"
-                    }`}
-                  >
-                   {isUser ? (
-                    <p className="whitespace-pre-wrap">
-                      {msg.content || msg.text}
-                    </p>
-                  ) : msg.sender === "botTyping" ? (
-                    <div className="whitespace-pre-wrap">
-                    <MarkdownRenderer content={msg.text} />
-                    </div>
-                  ) : (
-                    <>
-                      <div className="whitespace-pre-wrap">
-                        <MarkdownRenderer content={msg.content || msg.text} />
-                      </div>
-                        <StarRating
-                          rating={ratings[i] || 0}
-                          onRate={(star) => handleRate(star, i)}
-                          disabled={submitteds[i] || false}
-                        />
-                        {submitteds[i] && (
-                          <div className="text-green-600 text-sm mt-1">Merci pour votre avis !</div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
+                    
+          return (
+            <div
+              key={i}
+              className={`max-w-[70%] p-3 rounded-md whitespace-pre-wrap border ${
+                isUser
+                  ? "self-end bg-blue-50 border-blue-200"
+                  : "self-start bg-gray-100 border-gray-300"
+              }`}
+            >
+              {isUser ? (
+                <p>{msg.content || msg.text}</p>
+              ) : isTyping ? (
+                // Affiche juste le texte en train d’être tapé sans étoiles ni MarkdownRenderer
+                <p>{msg.text || ""}</p>
+              ) : (
+                <>
+                  <MarkdownRenderer content={msg.content || msg.text || ""} />
+                  <StarRating
+                    rating={ratings[i] || 0}
+                    onRate={(star) => handleRate(star, i)}
+                    disabled={submitteds[i] || false}
+                  />
+                  {submitteds[i] && (
+                    <div className="text-green-600 text-sm mt-1">Merci pour votre avis !</div>
+                  )}
+                </>
+              )}
+            </div>
+          );
               })
             )}
-  
             {isTyping && (
               <div className="flex items-center space-x-1 self-start px-4 py-2 bg-gray-200 rounded">
                 <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" />

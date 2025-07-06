@@ -38,7 +38,15 @@ def register():
     })
     user_id = str(result.inserted_id)
     init_user_index(user_id)
-    return jsonify({"message": "Inscription réussie"}), 201
+    token = jwt.encode({
+        "user_id": user_id,
+        "exp": datetime.utcnow() + timedelta(hours=12)
+    }, current_app.config["SECRET_KEY"], algorithm="HS256")
+
+    return jsonify({
+        "message": "Inscription réussie",
+        "token": token
+    }), 201
 
 @auth_bp.route("/login", methods=["POST"])
 def login():

@@ -52,13 +52,15 @@ const Search = () => {
   const [showModal, setShowModal] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [groupedResults, setGroupedResults] = useState([]);
+
+  
   const allSuggestions = [
     "Large Language Models for Scientific Research",
     "Deep Learning for Medical Imaging",
     "AI in Agriculture",
     "Natural Language Processing in Education",
     "Graph Neural Networks",
-    "Explainable AI",
+    "Explainable AI", 
     "Reinforcement Learning",
     "Climate Change Modeling with AI",
     "Biomedical Signal Processing",
@@ -514,6 +516,7 @@ const getPdfUrl = (doc) => {
                 <option value="fr">Français</option>
                 <option value="ar">Arabe</option>
                 <option value="de">Allemand</option>
+                <option value="es">Espagnol</option>
                 <option value="it">Italien</option>
               </select>
             </div>

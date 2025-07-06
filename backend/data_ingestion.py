@@ -188,9 +188,9 @@ def search_core(query="machine learning", max_results=3, language="en"):
             # Traduction
             if language != "en":
                 try:
-                    title =translate_text(title, dest=language).text
+                    title =translate_text(title,language).text
                     if summary and summary != "Résumé non disponible":
-                        summary = translate_text(summary, dest=language).text
+                        summary = translate_text(summary,language).text
                 except Exception as e:
                     print(f"[⚠️ Traduction titre/résumé CORE échouée] : {e}")
 

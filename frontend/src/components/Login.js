@@ -28,7 +28,7 @@ const Login = () => {
       setUser(user); // ✅ enregistre dans le contexte
       localStorage.setItem("just_logged_in", "true");
       await new Promise(resolve => setTimeout(resolve, 100)); 
-      navigate('/ChatApp');
+      navigate('/chatapp');
     } catch (err) {
       console.error('Erreur login :', err);
       setError(err.message);
