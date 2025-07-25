@@ -343,77 +343,11 @@ const startTypingAnimation = () => {
     fetchConversation();
   }, [selectedConversationId]);
 
-  // --- Recherche documents ---
-  const fetchDocuments = (source, query) => {
-    if (!query) return;
-    const token = localStorage.getItem("authToken");
-    const bar = document.getElementById("progress-bar");
-    let width = 0;
-
-    const startProgress = () => {
-      if (bar) {
-        bar.style.width = "0%";
-        bar.style.opacity = "1";
-        bar.interval = setInterval(() => {
-          if (width < 90) {
-            width += 1;
-            bar.style.width = `${width}%`;
-          }
-        }, 30);
-      }
-    };
-
-    const endProgress = () => {
-      if (bar) {
-        clearInterval(bar.interval);
-        bar.style.width = "100%";
-        setTimeout(() => {
-          bar.style.opacity = "0";
-          bar.style.width = "0%";
-        }, 500);
-      }
-    };
-
-    startProgress();
-    fetch("http://localhost:5000/fetch_documents", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ query, source, max_results: 5 }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setSearchResults(data.documents || []);
-        setShowResultsBubble(true);
-      })
-      .catch((err) => {
-        console.error("Erreur recherche:", err);
-        setSearchResults([
-          {
-            title: "Erreur",
-            summary: "Problème lors de la récupération.",
-            url: "#",
-          },
-        ]);
-        setShowResultsBubble(true);
-      })
-      .finally(() => {
-        endProgress();
-      });
-  };
 
 
   const handleClearChat = () => setChat([]);
 
-  // --- Animation bulle bienvenue ---
-  useEffect(() => {
-    if (!showWelcomeBubble) return;
-    const timer = setTimeout(() => setShowWelcomeBubble(false), 3000);
-    return () => clearTimeout(timer);
-  }, [showWelcomeBubble]);
-
+ 
   const handleSelectConversation = (id) => setSelectedConversationId(id);
 
   const handleTemplateClick = (templateType) => {

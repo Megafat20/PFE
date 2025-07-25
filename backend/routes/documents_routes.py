@@ -582,36 +582,6 @@ def delete_document(user, doc_id):
 
 
 
-@bp_documents.route('/fetch_documents', methods=['POST'])
-@token_required
-def fetch_documents(user):
-    data = request.get_json()
-    query = data.get('query')
-    source = data.get('source')
-    max_results = data.get('max_results', 5)
-
-    documents = []
-    if source == 'all':
-        all_docs = []
-        all_docs.extend(search_arxiv(query, max_results))
-        all_docs.extend(search_pubmed(query, max_results))
-        # all_docs.extend(search_semantic_scholar(query, max_results))
-        all_docs.extend(search_openalex(query, max_results))
-        documents = merge_and_deduplicate(all_docs)
-    elif source == 'arxiv':
-        documents = search_arxiv(query, max_results)
-    elif source == 'pubmed':
-        documents = search_pubmed(query, max_results)
-    # elif source == 'semantic_scholar':
-    #     documents = search_semantic_scholar(query, max_results)
-    elif source == 'openalex':
-        documents = search_openalex(query, max_results)
-    else:
-        # gérer source inconnue si besoin
-        documents = []
-
-    documents = sorted(documents, key=lambda d: d.get('title', '').lower())
-    return jsonify({'documents': documents})
 
 
 @bp_documents.route("/proxy_pdf")

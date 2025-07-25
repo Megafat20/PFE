@@ -109,8 +109,6 @@ def upload_summarize(user):
         return jsonify({"error": f"Erreur lors de l'analyse : {str(e)}"}), 500
 
 
-
-
 @bp_multi.route('/summary', methods=['POST'])
 @token_required
 def summary(user):
